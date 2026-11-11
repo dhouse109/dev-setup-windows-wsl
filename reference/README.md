@@ -6,6 +6,9 @@ A read-only copy of what this bundle forks from. Nothing here runs, gets linted,
 |---|---|---|---|---|
 | `dev-setup-chromebook/` | [dhouse109/dev-setup-chromebook](https://github.com/dhouse109/dev-setup-chromebook) | `v101` | `68113ff633e19005707394b375f25dd505cfccee` (merge of `release/v101`, 2026-11-09) | 2026-11-11 |
 
+This bundle's v1 is **based on Chromebook v101** (decided 2026-11-11; `CHANGELOG.md` will record
+the same once it exists).
+
 What the copy holds, byte for byte from the tag (extracted with `git archive v101`):
 
 - the four scripts: `dev-setup-chromebook.sh`, `dev-test-chromebook.sh`, `dev-init-chromebook.sh`,
@@ -25,9 +28,9 @@ should take it as describing that repo, not this one; this repo's rules are in t
 
 ## Rules
 
-- **Never edit anything in this folder** (the one exception is leaving out `CLAUDE.md`, above). It is a snapshot of a published Chromebook release, not
-  working code. Don't run the scripts either (their host guard stops them anywhere but ChromeOS, and
-  `DEV_BUNDLE_ANY_HOST` is never set to get past it).
+- **Never edit anything in this folder** (the one exception is leaving out `CLAUDE.md`, above). It is a
+  snapshot of a published Chromebook release, not working code. Don't run the scripts either (their host
+  guard stops them anywhere but ChromeOS, and `DEV_BUNDLE_ANY_HOST` is never set to get past it).
 - **Refresh only by replacing it wholesale** with a newer Chromebook tag, in a commit of its own:
   delete `dev-setup-chromebook/`, extract the same file list from the new tag with `git archive` (still
   without `CLAUDE.md`), and update the table above (tag, commit SHA, copy date).
