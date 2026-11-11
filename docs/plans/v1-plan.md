@@ -1,13 +1,13 @@
 # dev-setup-windows-wsl v1 plan
 
-2026-11-11 · step 4 of the suggested sequence in [wsl-plan.md](wsl-plan.md) · **draft, pending owner
-review** · 23 questions for the owner in section 6
+2026-11-11 · step 4 of the suggested sequence in [wsl-plan.md](wsl-plan.md) · **approved by the owner
+2026-11-11 (PR #2 review)** · questions answered 2026-11-11
 
 This is the build spec for step 5: the preliminary build in the cloud, on `release/v1`. It says what
 gets built, in which order, how the first run on d3 goes, and when v1 counts as done. It is the approved
-decisions turned into a worklist; it decides nothing new. Where the build needs something that is not
-settled, it is a question in section 6 with a recommendation, and the text marks the spot with
-**(P*n*)**.
+decisions turned into a worklist. Where the build needed something no decision settled, it was a
+question in section 6 with a recommendation. The owner accepted all 23 as recommended on 2026-11-11,
+with notes on P1, P12 and P21. The text now states each answer and keeps **(P*n*)** as a pointer to it.
 
 Inputs, read in this order:
 
@@ -101,8 +101,8 @@ confirm nothing still points at the old place.
 **Two changes to the suggested order, and why.** The PowerShell CI job moves from stage 8 to stage 7,
 into the same commit as the host script, so that stage is checked by CI on its own instead of waiting
 one commit for its linter. And stage 6 takes setup's leftover text items as well as init's and demo's,
-so stages 3 and 4 stay small enough to review hunk by hunk. Otherwise the order is as suggested
-**(P23)**.
+so stages 3 and 4 stay small enough to review hunk by hunk. Otherwise the order is as suggested. The
+owner confirmed both changes **(P23)**.
 
 ### Stage 1: fork and rename
 
@@ -129,10 +129,13 @@ stage 8 needs that list for AGENTS.md rule 1.
 
 **Host guard (S2, T2, I2, D3; Q22, Q23).** The same block in all four scripts, edited in place:
 
-- WSL is detected by `$WSL_DISTRO_NAME` or `/proc/sys/fs/binfmt_misc/WSLInterop`, and sets
-  `DEV_ON_WSL=1` where the Chromebook guard sets `DEV_ON_CHROMEOS`. **(P1)** covers two details the
-  decisions leave open: a second interop file name, and how WSL 2 is told from WSL 1.
-- WSL 1 is refused with its own message.
+- WSL is detected by `$WSL_DISTRO_NAME`, or by either interop file under `/proc/sys/fs/binfmt_misc/`:
+  `WSLInterop`, or `WSLInterop-late`, the name WSL uses when systemd is on. Either one sets
+  `DEV_ON_WSL=1` where the Chromebook guard sets `DEV_ON_CHROMEOS` **(P1)**.
+- WSL 2 is required. It is detected by `WSL2` in the kernel release (`uname -r`), which holds for
+  Microsoft's kernel. WSL 1 is refused with its own message **(P1)**.
+- Both strings (the interop file's name and the kernel release) are confirmed on d3 at step 3 of the
+  first run.
 - The Debian check and the `DEV_BUNDLE_ANY_HOST` offer keep their wording, with "ChromeOS's Linux"
   replaced by "Debian on WSL2".
 
@@ -146,8 +149,8 @@ message that names the fix. In this order:
 | 2 | The bundle folder is not under `/mnt/*` | Stop: clone into the Linux home |
 | 3 | No CR line endings in the sibling `dev-*.sh` files | Stop: name the files and the `.gitattributes` fix |
 | 4 | systemd is running | Stop: run the host script, then `wsl --shutdown` |
-| 5 | No Windows directory on `PATH` | **(P2)**: stop or warn |
-| 6 | Docker Desktop's WSL integration is not on for this distro | Stop (Q4). How it is detected is **(P3)** |
+| 5 | No Windows directory on `PATH` | Stop: the message names the `wsl.conf` line (`appendWindowsPath=false`) and the host script **(P2)** |
+| 6 | Docker Desktop's WSL integration is not on for this distro | Stop (Q4), but only on a positive sign inside the distro: the `docker` command resolving into Docker Desktop's shared mount, or its proxy process running here. "Cannot tell" counts as not on. The signs are confirmed on a laptop that has Docker Desktop; if d3 has none, the changelog says the check is unverified **(P3)** |
 | 7 | `sudo -n true` works | Stop: the host script writes the drop-in (Q21) |
 | 8 | Debian's `VERSION_ID` is 13 | Warn only (Q23) |
 
@@ -163,7 +166,9 @@ block, identical in all four scripts (the block stays "copied verbatim from the 
 - **After the dependency guards:** remove any refused flag from `FLAGS` and print one NOTICE per flag
   ("skipped: not yet supported on WSL"). This is what handles `install-ecosystems` and `install-all`
   bringing in install-android-native.
-- The reasons, one line each, are **(P4)**.
+- The reasons, one line each **(P4)**: install-lan and install-lan-share, "waits for the Tailscale
+  decision (Q8)"; install-android-native, "Android Studio comes later, on Windows (Q10)"; install-retro
+  and install-com, "planned for a later version (Q11)".
 
 **S6.** `stage_expect` only registers a stage when one of its flags is in `FLAGS` (setup 362–375), so a
 stripped flag's stages are simply not expected and cannot show as "not reached". Confirmed by reading
@@ -179,22 +184,22 @@ All in `dev-setup-wsl.sh`, in the order the script reaches them.
 | Item | Section | Edit |
 | --- | --- | --- |
 | S9 | `stage system` | Remove `sudo passwd -d "$USER"` and its comment. Replace with a `# v1:` comment: sudo is passwordless through the drop-in the host script wrote (Q7, Q21), and the preflight has already checked it |
-| S10 | `stage ssh` | The key comment `$USER@chromebook` gets a machine name **(P5)** |
+| S10 | `stage ssh` | The key comment `$USER@chromebook` becomes `$USER@$(hostname)`. Under WSL the hostname is the Windows computer name, which tells the four laptops apart **(P5)** |
 | S12 | `stage docker` | Remove the `video` / `render` loop and its comment. `# v1:` WSLg's GPU is `/dev/dxg`, with no render node and no group to join |
 | S14 | `stage homebrew` | DDEV's 8080/8443 step runs unconditionally: drop the `DEV_ON_CHROMEOS` branch, reword the two messages. `# v1:` the reason on WSL is parity with the Chromebooks (Q17), not a forwarding limit |
-| S15 | `stage homebrew` | Replace the ChromeOS certificate-import instructions with a short report: whether mkcert's CA folder is the one shared from Windows (Q24), and if not, a NOTICE naming the host-script step. Whether setup also writes `CAROOT` somewhere is **(P6)** |
-| S17, S23 | `stage chrome` | Replace the `garcon_host_browser.desktop` block with three things (Q19, Q28). (1) The opener, written to a `.new` file and moved into place as `devmem` is. (2) A handler entry for it, `NoDisplay=true`, in `~/.local/share/applications`, registered with `xdg-mime default` for the same three types as on the Chromebook. It is not a launcher, so Q20 does not move it. (3) A marked `~/.bashrc` block, rewritten in place, that exports `BROWSER` and `DONT_PROMPT_WSL_INSTALL=1`; both are exported for the rest of the run too. Names are **(P7)** |
+| S15 | `stage homebrew` | Replace the ChromeOS certificate-import instructions with a short report: whether mkcert's CA folder is the one shared from Windows (Q24), and if not, a NOTICE naming the host-script step. Setup does not write `CAROOT` anywhere; it relies on `WSLENV`, and the test warns when the folder in use is not the shared one **(P6)** |
+| S17, S23 | `stage chrome` | Replace the `garcon_host_browser.desktop` block with three things (Q19, Q28). (1) The opener, written to a `.new` file and moved into place as `devmem` is. (2) A handler entry for it, `NoDisplay=true`, in `~/.local/share/applications`, registered with `xdg-mime default` for the same three types as on the Chromebook. It is not a launcher, so Q20 does not move it. (3) A marked `~/.bashrc` block, rewritten in place, that exports `BROWSER` and `DONT_PROMPT_WSL_INSTALL=1`; both are exported for the rest of the run too. Names **(P7)**: the opener is `~/.local/bin/dev-open`, its handler `dev-open.desktop`, the block `# >>> dev-setup wsl >>>` |
 | S39 | install-ldap | `ldap ui` calls the opener, else `xdg-open` |
 | S18, S19 | `stage devmem` | Q31: the residual line becomes "not accounted for (estimate)"; the "ChromeOS has taken back" verdict goes; the Linux Chrome verdict says links open in the Windows browser; header comments and the closing echo follow |
 | S21 | `stage devclean` | One note in `--help` and after `--run`: freed space returns to Windows when the VHDX is sparse, otherwise after compacting it (Q26) |
-| S22, S59 | `stage shared-helpers`, install-models | Q25: `disk_margin_gb`, `disk_free_gb` and the install-models reading use the smaller of the Linux figure and the Windows drive's. Which drive is **(P8)** |
+| S22, S59 | `stage shared-helpers`, install-models | Q25: `disk_margin_gb`, `disk_free_gb` and the install-models reading use the smaller of the Linux figure and the Windows drive's. The drive is `/mnt/c` unless `DEV_WSL_HOST_DRIVE` names another; if the mount is not there, the Linux figure is used alone and setup says so once **(P8)** |
 | S57 | `stage finalize` | Drop "For GPU acceleration (render group), shut Linux down…". The docker-group line says: a new terminal, or `wsl --terminate <distro>` from Windows |
 
-**The opener, as decided (Q19).** One argument, a URL or a path. An existing local path, or a
-`file://` URL that names one, is converted with `wslpath -w`. Then it runs
-`rundll32.exe url.dll,FileProtocolHandler <target>`, with `rundll32.exe` found by absolute path
-through `wslpath` and not through `PATH`. If Windows interop is off or the program is missing, it says
-so and exits non-zero; it never falls back to Linux Chrome silently.
+**The opener, `dev-open`, as decided (Q19, P7).** One argument, a URL or a path. An existing local path,
+or a `file://` URL that names one, is converted with `wslpath -w`. Then it runs `rundll32.exe
+url.dll,FileProtocolHandler <target>`, with `rundll32.exe` found by absolute path through `wslpath` and
+not through `PATH`. If Windows interop is off or the program is missing, it says so and exits non-zero;
+it never falls back to Linux Chrome silently.
 
 **Done when** the setup diff shows these 14 items and stage 1–2's, and
 `grep -n 'DEV_ON_CHROMEOS\|garcon\|passwd -d' dev-setup-wsl.sh` finds nothing outside comments and the
@@ -214,8 +219,10 @@ All in `dev-setup-wsl.sh`. Q20 moves the entries the bundle writes to
 | S32 | install-antigravity | The entry moves; message |
 | S42 | install-redis, install-mongodb | Four messages say Start menu. Redis Insight and Compass already install into `/usr/share/applications` |
 
-Where the entries' icons live is **(P9)**. An entry in a system folder that points at one user's home
-(`Exec=/home/<user>/.local/bin/cursor`) is accepted: the distro has one user.
+The entries' icons (Cursor's, Godot's, Antigravity's) are written to `/usr/local/share/pixmaps`, and
+`Icon=` points there, because whether WSLg can read an icon from a home directory is unconfirmed; the
+Start menu is checked on the first run **(P9)**. An entry in a system folder that points at one user's
+home (`Exec=/home/<user>/.local/bin/cursor`) is accepted: the distro has one user.
 
 **Done when** the grep under the additions table finds no bundle launcher still written to
 `~/.local/share/applications`, other than the two handler entries (the opener's and Devin's URL
@@ -250,7 +257,7 @@ the user may change:
 | T12 | Base (DDEV) | The router-port check runs unconditionally; labels lose "(ChromeOS passes no 80/443)" |
 | T13 | Base (links) | The handler check names the opener's entry instead of `garcon_host_browser.desktop`. Still a WARN |
 | T14, T15 | TanStack | Hints reworded (inotify; localhost reaches Windows through localhost forwarding) |
-| T18, T20, T45, T46 | Cursor, Lazarus, Godot, Antigravity | Launcher checks look in `/usr/local/share/applications`; labels say Start menu. Cursor's icon check follows **(P9)** |
+| T18, T20, T45, T46 | Cursor, Lazarus, Godot, Antigravity | Launcher checks look in `/usr/local/share/applications`; labels say Start menu. Cursor's icon check looks in `/usr/local/share/pixmaps` **(P9)** |
 | T19 | Devin Desktop / Windsurf | X11 entry in the new folder; wrapper has the flag and the variable; the "stock entry hidden" check goes with the step it tested; hints lose "shut Linux down" |
 | T21, T22, T27 | Godot | Labels and hints only. The logic already passes on a D3D12 renderer and warns only on llvmpipe or softpipe |
 | T23 | Godot | "the Linux VM exposes a GPU (`/dev/dri/renderD*`)" becomes a `/dev/dxg` check, with a hint about the Windows GPU driver and `wsl --update` |
@@ -308,16 +315,16 @@ because one step in the middle is the owner's.
 | --- | --- | --- |
 | 1 | Checks | Windows 11 22H2 or later; x64; report and stop otherwise |
 | 2 | WSL itself | Enable or update it. If Windows needs a restart, say so and stop; the owner reruns |
-| 3 | `.wslconfig` | Written **before** the distro exists (Q26). Contents below. How it treats a file that is already there is **(P10)** |
+| 3 | `.wslconfig` | Written **before** the distro exists (Q26). Contents below. In a file that is already there the script sets only the keys that are missing; a key that is there with another value is left alone and reported **(P10)** |
 | 4 | Install Debian | Without launching it. If a distro of that name exists, skip; for an existing one, try the sparse conversion only if WSL accepts it without `--allow-unsafe`, else print the manual compaction steps (Q26) |
 | 5 | **Stop for the owner** | If the distro has no user account yet (its default user is root), print: open Debian once, create the user, exit, rerun this script. This is Q21's ordering |
 | 6 | Check it is Debian 13 | Report and stop if not |
 | 7 | `/etc/wsl.conf` | As root: `[boot] systemd=true`, `[interop] appendWindowsPath=false` (Q9). Other keys kept |
-| 8 | Bootstrap packages | **(P11)**: whether the script installs `sudo`, `git` and `ca-certificates` as root when the image lacks them |
-| 9 | sudoers drop-in | As root: one NOPASSWD line for the user, mode 0440, checked with `visudo -cf` before it is installed and `visudo -c` after (Q7, Q21). File name **(P12)** |
-| 10 | mkcert on Windows | `mkcert -install` on Windows, then `CAROOT` as a user environment variable and `CAROOT/up` added to `WSLENV`, keeping what `WSLENV` already holds (Q24). How mkcert gets onto Windows is **(P13)** |
+| 8 | Bootstrap packages | As root, install `sudo`, `git` and `ca-certificates`, each only when the image lacks it. The script does not clone the repo; it prints the command **(P11)** |
+| 9 | sudoers drop-in | As root: one NOPASSWD line for the user, mode 0440, checked with `visudo -cf` before it is installed and `visudo -c` after (Q7, Q21). The file is `/etc/sudoers.d/dev-bundle`, its line `<user> ALL=(ALL:ALL) NOPASSWD: ALL`. The name has no dot on purpose: sudo skips files in `/etc/sudoers.d/` whose names contain one. A `# v1:` comment says so where the script writes the file **(P12)** |
+| 10 | mkcert on Windows | `mkcert -install` on Windows, then `CAROOT` as a user environment variable and `CAROOT/up` added to `WSLENV`, keeping what `WSLENV` already holds (Q24). mkcert is used if it is already there (the native dev-setup-windows bundle may have installed it), otherwise installed with `winget`; without `winget` the step is skipped with a notice, and setup's S15 report then says the CA is not shared **(P13)** |
 | 11 | Docker Desktop | Check whether its WSL integration is on for this distro; report; change nothing (Q4) |
-| 12 | Apply | If `wsl.conf` changed, terminate this distro so it restarts with systemd. Whether the script ever runs `wsl --shutdown` itself is **(P14)** |
+| 12 | Apply | If `wsl.conf` changed, terminate this distro so it restarts with systemd. The script never runs `wsl --shutdown` on its own: for a `.wslconfig` change it prints the command, unless no distro is running **(P14)** |
 | 13 | Report and hand off | One summary block: what was done, what was already in place, what is left. Then the next commands (below) |
 
 **`.wslconfig` contents** (in the Windows user's profile; it applies to every WSL distro on the
@@ -326,7 +333,7 @@ laptop):
 ```ini
 [wsl2]
 memory=24GB        # about 75% of host RAM: 24GB on the 32 GB laptops, 12GB on the 16 GB ones (Q18)
-swap=8GB           # (P10): the value is not settled
+swap=8GB           # 25% of host RAM, WSL's own default written down: 8GB and 4GB (P10)
 
 [experimental]
 sparseVhd=true     # before the distro is installed, so its disk is created sparse (Q26)
@@ -353,10 +360,11 @@ appendWindowsPath=false
 **What it never does:** change Docker Desktop's settings; pass `--allow-unsafe`; set a networking
 mode; unregister or reset a distro; touch another distro; store or print a credential.
 
-**PowerShell version and file encoding** are **(P15)**.
+**PowerShell version and file encoding (P15).** Written for Windows PowerShell 5.1, which every
+Windows 11 has, and ASCII-only, so 5.1 cannot misread the file's encoding.
 
 **CI, same commit:** a `powershell` job in `lint.yml` on a Windows runner: a parse check of
-`dev-host-wsl.ps1`, and PSScriptAnalyzer at Error severity.
+`dev-host-wsl.ps1` under Windows PowerShell 5.1 (P15), and PSScriptAnalyzer at Error severity.
 
 ### Stage 8: CHANGELOG, README and the version check
 
@@ -374,7 +382,7 @@ mode; unregister or reset a distro; touch another distro; store or print a crede
   from "planning; nothing is built" to "v1 built, not yet confirmed run in WSL", and wsl-plan.md's
   sequence marks step 5.
 - **CI:** port the Chromebook's one-version-number check, extended to five scripts plus the README.
-  The Chromebook repo's `tests/` folder is not ported **(P22)**.
+  The Chromebook repo's `tests/` folder is not ported in v1 **(P22)**.
 
 ### Stage 9: docs
 
@@ -387,12 +395,15 @@ mode; unregister or reset a distro; touch another distro; store or print a crede
   already known, each entry in that file's form (what happens, why, the fix): the VM's lifetime and
   `vmIdleTimeout` as a possible lever, marked unverified (Q33); the VHDX, sparse disks and compaction
   (Q26), and `df` reading the virtual size (Q25); never under `/mnt`; CRLF; the Windows PATH (Q9); the
-  Start menu's four folders (Q20); VS Code's question (Q28); links and the opener (Q19); mkcert's CA
-  shared from Windows (Q24); Docker Desktop (Q4); d4 and AVX (review C2). First-run findings are added
+  Start menu's four folders (Q20); VS Code's question (Q28); links and the opener (Q19); editor
+  sign-ins that return through a custom URL scheme, including this one: if a native Windows VS Code is
+  installed on the same laptop (for example by dev-setup-windows), a `vscode://` sign-in link opens
+  that Windows editor and not the one in WSL (P21); mkcert's CA shared from Windows (Q24); Docker
+  Desktop (Q4); d4 and AVX (review C2). First-run findings are added
   to it as they are made.
 
-This is the owner's recommendation for stage 9, and this plan agrees with it; **(P16)** asks only
-about the refused sections.
+This is the owner's recommendation for stage 9. The refused flags' sections stay in the forked docs,
+under the one-line note, and are not cut out **(P16)**.
 
 ## 3. First-run protocol on d3
 
@@ -447,7 +458,7 @@ The 15 first-run checks from the review, placed.
 | 6 | Linux Chrome, an AppImage, Redis Insight and Compass start | Run A (Chrome), Run B | By hand, from the terminal and from the Start menu |
 | 7 | The opener: handler, `BROWSER`, a localhost callback, a `file://` path | Run A | `xdg-open https://example.com`; the opener on a local file; init's `gh` and `codex` logins. A long sign-in URL (gcloud) in Run B |
 | 8 | A DDEV site opens on 8443 in the Windows browser, with no certificate warning | Run A | A scratch DDEV project by hand, then removed |
-| 9 | Cursor's and Devin's scripts and VS Code's question; Devin's stock Start menu entry | Run B | `cursor --version`, the Devin wrapper, both Start menu entries |
+| 9 | Cursor's and Devin's scripts and VS Code's question; Devin's stock Start menu entry; each editor's sign-in (P21) | Run B | `cursor --version`, the Devin wrapper, both Start menu entries. Then sign in to each editor and note which sign-ins complete. Note also whether a native Windows VS Code is installed on the laptop: if it is, a `vscode://` sign-in link opens that Windows editor and not the one in WSL |
 | 10 | The Qt5 Lazarus IDE: dialog focus, floating layout, dark palette | Run B | By hand: New Project, Run Parameters, `lazmode dock off`, the dark launcher |
 | 11 | The inotify default; `/proc/self/io` | Step 3 | `cat /proc/sys/fs/inotify/max_user_watches`; `test -e /proc/self/io` |
 | 12 | `df` on the Windows drive's mount gives a usable figure | Step 3 | `df -h / /mnt/c` |
@@ -458,29 +469,33 @@ The 15 first-run checks from the review, placed.
 Start menu entries may need a `wsl --shutdown` and a new session before they show. Check that before
 calling one missing.
 
+Two more read-only checks at step 3, for the host guard **(P1)**: `uname -r` contains `WSL2`, and
+`ls /proc/sys/fs/binfmt_misc/` shows which interop file is there (`WSLInterop` or `WSLInterop-late`).
+
 ### What comes back
 
 - **With the local agent on d3:** nothing is pasted. After each script the agent reads
   `assets/logs/dev-setup-<date-time>.output`, `dev-test-<date-time>.output` and its `.log`,
   `assets/setup-stages.tsv` and the disk TSV, by path.
 - **The host script** runs on Windows, outside the agent's reach: the owner pastes its summary block
-  into the session. The block is written to be safe to paste (no credentials, no home paths); how it
-  is saved is **(P17)**.
+  into the session. The block is written to be safe to paste (no credentials, no home paths). It goes
+  to the console only; there is no log file on the Windows side in v1 **(P17)**.
 - **In a cloud session:** the owner pastes the end of the test run (the summary block and every FAIL
   and WARN line) and the stage summary at the end of setup.
 - **Nothing from a run goes into a PR comment** beyond counts, results and repo-relative paths
   (AGENTS.md, "PR comments are public").
 
-**Fixes** found on the way are made on `release/v1` and reported per run. Whether they stay in v1 is
-**(P18)**.
+**Fixes** found on the way are made on `release/v1` and reported per run. They stay in v1, each with
+a dated finding in its comment and a line in the changelog entry **(P18)**.
 
 ## 4. Acceptance
 
 v1 is done when, on d3:
 
 1. Run B (`install-all`) and each Run C group end with **setup: 0 failed, 0 unreached stages** and
-   **test: FAIL 0, WARNs only for optional credentials** (AGENTS.md, "Workflow"). A GPU WARN is the
-   one foreseeable exception, and it is **(P19)**.
+   **test: FAIL 0, WARNs only for optional credentials** (AGENTS.md, "Workflow"). One exception is
+   agreed in advance: if Debian 13's Mesa has no d3d12 driver, the Godot section's software-rendering
+   WARN is accepted for v1 as a recorded known issue, written up in the gotchas doc **(P19)**.
 2. The refused-list check (step 7) behaves as decided.
 3. The C5 checks that can be made on d3 (1–14) each have a recorded result. A check may come out "does
    not work, documented in the gotchas doc, accepted by the owner"; it may not come out "not looked
@@ -489,8 +504,10 @@ v1 is done when, on d3:
 
 Then: merge, delete the branch, tag `v1`, publish the GitHub Release with the changelog entry.
 
-**d4.** Q12 says d4 gets a run "before the bundle is called done". Whether that run is part of v1's
-acceptance is **(P20)**; the recommendation is that it comes after v1 is tagged.
+**d4.** Q12 says d4 gets a run "before the bundle is called done". That run is not part of v1's
+acceptance **(P20)**: v1 is tagged after d3's clean run, with a release note that says "confirmed on
+d3; d4 not yet run". Then d4, and d1 for CUDA, run with per-machine flags; what they find goes into v2
+and the per-machine notes. The bundle is not called done until d4 has run.
 
 ## 5. Risks
 
@@ -502,103 +519,136 @@ get past it; "degrades" means the run finishes with something not working.
 | 1 | **Debian's WSL image is not what the host script expects:** systemd state, whether `sudo` and `git` are there, how the first launch creates the user, whether it is Debian 13 | Blocks at step 0–2 | The host script checks each and stops with a message. None of this could be confirmed from a source (review, C5 item 1) |
 | 2 | **`dockerd` does not start** under the WSL kernel with Debian 13's iptables | Blocks Run A at `stage docker`; everything after depends on it | Older reports needed `iptables-legacy`. Run A finds it in minutes; the fix would be one guarded step |
 | 3 | **The scripts have never run.** About 35,600 forked lines, edited in the cloud, checked only by `bash -n` and shellcheck | Blocks wherever a typo sits | Stage 1's rename-only diff, small stages, the per-stage greps, and Run A before Run B |
-| 4 | **The preflight stops a good machine:** the Docker Desktop signals (P3), a `PATH` entry under `/mnt` that is legitimate (P2), the guard's interop file under systemd (P1) | Blocks Run A before it starts | The message names the check. Each has a question here |
+| 4 | **The preflight stops a good machine:** the Docker Desktop signals (P3), a `PATH` entry under `/mnt` that is legitimate (P2), the guard's interop file under systemd (P1) | Blocks Run A before it starts | The message names the check. P1–P3 say how each is handled, and each has a first-run confirmation |
 | 5 | **The opener:** `xdg-open` on Debian 13 may not consult the registered handler under WSL; `rundll32` with a very long sign-in URL | Degrades init's browser logins and demo pages | `BROWSER` is set as well (Q19). Tokens in `secrets.env` avoid the browser |
 | 6 | **mkcert's shared CA:** `CAROOT` reaches only processes started after the host script ran, and may not reach a shell started some other way | Degrades: certificate warnings in the Windows browser | The host script says "open a new terminal"; setup reports which CA folder it used (S15); the test warns |
 | 7 | **WSLg with systemd:** `/tmp` as tmpfs hiding the X11 socket, or the Wayland socket missing from the runtime directory | Degrades every GUI app and the Godot render test | Checked at step 3, before any install |
-| 8 | **Debian 13's Mesa has no d3d12 driver** | Degrades to software rendering; test WARNs | P19. Nothing fails |
-| 9 | **Editors:** Cursor's or Devin's script asks VS Code's question; Devin's stock entry crashes; a sign-in that returns through a custom URL scheme (`vscode://`, `windsurf://`) cannot come back from the Windows browser | Degrades the editors | Q28's variable in the wrapper; **(P21)** for the sign-in |
+| 8 | **Debian 13's Mesa has no d3d12 driver** | Degrades to software rendering; test WARNs | Accepted for v1 as a known issue (P19). Nothing fails |
+| 9 | **Editors:** Cursor's or Devin's script asks VS Code's question; Devin's stock entry crashes; a sign-in that returns through a custom URL scheme (`vscode://`, `windsurf://`) cannot come back from the Windows browser | Degrades the editors | Q28's variable in the wrapper. For the sign-in, no code in v1: each editor's sign-in is tried on the first run and the working route goes into the gotchas doc. A native Windows VS Code on the same laptop takes `vscode://` links for itself **(P21)** |
 | 10 | **Sparse VHD:** the installed WSL ignores or rejects `sparseVhd`, or the earlier corruption reports still apply | Degrades disk return, or worse | Never `--allow-unsafe`; a new distro holds nothing worth losing on its first day; settings confirmed after the first d3 run (Q26) |
-| 11 | **Disk figures:** `df` on the Windows drive's mount is unusable, so the guards fall back to the Linux figure | Degrades the guards to what they are on a Chromebook | P8's fallback |
+| 11 | **Disk figures:** `df` on the Windows drive's mount is unusable, so the guards fall back to the Linux figure | Degrades the guards to what they are on a Chromebook | The fallback to the Linux figure alone (P8) |
 | 12 | **The VM stops when idle** and takes Ollama and containers with it | Degrades "starts with Linux" | Observed, not fixed, in v1 (Q33) |
 | 13 | **The IPv4 preference check** edits `/etc/gai.conf` on every laptop | Neither; a surprise | Harmless; recorded (Q27) |
 
-## 6. Questions for the owner
+## 6. Questions for the owner (answered 2026-11-11)
 
-Each is something the build needs and no decision settles. None is decided here. P1–P9 shape the
-bash scripts, P10–P15 and P17 the host script, P16 the docs, P18–P21 the first run and acceptance,
-P22–P23 the repo.
+Each was something the build needed and no decision settled. **The owner accepted all 23 as
+recommended on 2026-11-11 (PR #2 review), with notes on P1, P12 and P21.** Each question keeps its
+recommendation as written, followed by the acceptance and, for those three, the owner's note. P1–P9
+shape the bash scripts, P10–P15 and P17 the host script, P16 the docs, P18–P21 the first run and
+acceptance, P22–P23 the repo.
 
 - **P1. How the guard detects WSL and WSL 2.** Decided: `$WSL_DISTRO_NAME` or
   `/proc/sys/fs/binfmt_misc/WSLInterop`, and WSL 2 required. Not settled: with systemd on, WSL may
   register its interop under a second name (`WSLInterop-late`; from memory, not confirmed in a source),
   and nothing says how WSL 2 is told from WSL 1. *Recommendation:* accept either interop name, and call
   it WSL 2 when the kernel release contains `WSL2`. Confirm both strings on d3 at step 3.
+  **Accepted 2026-11-11 (PR #2 review).** *Owner's note:* accept both
+  `/proc/sys/fs/binfmt_misc/WSLInterop` and `WSLInterop-late`, the name WSL uses when systemd is on.
+  WSL 2 is detected by `WSL2` in the kernel release (`uname -r`), which holds for Microsoft's kernel.
+  Confirm both on d3 at step 3.
 - **P2. A Windows directory on `PATH`: stop or warn?** The handoff lists it under the preflight; the
   compatibility review says "or a preflight warning". *Recommendation:* stop. The reason for Q9 is that
   a Windows `npm` or `code` can satisfy `command -v` and make setup skip an install without saying so;
   a warning scrolls past. The message names the `wsl.conf` line and the host script.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P3. How Docker Desktop's integration is detected.** Not confirmed from a source. *Recommendation:*
   stop only on a positive sign inside the distro (the `docker` command resolving into Docker Desktop's
   shared mount, or its proxy process running here), and treat "cannot tell" as not on. Confirm the
   signs on a laptop that has Docker Desktop before relying on them; if d3 has none, the changelog says
   the check is unverified.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P4. The refused flags' one-line reasons.** *Recommendation:* install-lan and install-lan-share:
   "waits for the Tailscale decision (Q8)"; install-android-native: "Android Studio comes later, on
   Windows (Q10)"; install-retro and install-com: "planned for a later version (Q11)".
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P5. The SSH key comment.** *Recommendation:* `$USER@$(hostname)`. Under WSL the hostname is the
   Windows computer name, which tells the four laptops apart in GitHub's key list. Alternative: a fixed
   `$USER@wsl`.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P6. Does setup write `CAROOT` anywhere?** Q24 shares it through `WSLENV`, which reaches shells
   started from Windows. *Recommendation:* no; rely on `WSLENV` as DDEV documents, report the folder in
   use (S15) and let the test warn. Revisit if risk 6 shows up.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P7. Names for the opener and its `~/.bashrc` block.** *Recommendation:* `~/.local/bin/dev-open`,
   handler `dev-open.desktop`, block `# >>> dev-setup wsl >>>`, written in base where the Chromebook
   script registers the garcon handler.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P8. Which Windows drive the disk helpers read (Q25).** The VHDX's location is not visible from
   inside WSL. *Recommendation:* `/mnt/c` by default, since WSL keeps a distro's disk in the user's
   profile unless told otherwise, with a `DEV_WSL_HOST_DRIVE` override; if the mount is not there, use
   the Linux figure alone and say so once.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P9. Launcher icons.** The entries move to a system folder (Q20), but Cursor's, Godot's and
   Antigravity's icons are written under `~/.local/share/icons`, and whether WSLg can read an icon from
   a home directory is unconfirmed. *Recommendation:* write them to `/usr/local/share/pixmaps` and point
   `Icon=` there; check the Start menu on the first run.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P10. `.wslconfig`: swap size, and a file that already exists.** Q18 says "adds swap" without a
   figure; `.wslconfig` is shared by every distro on the laptop. *Recommendation:* swap at 25% of host
   RAM (8 GB and 4 GB), which is WSL's own default written down. Set only missing keys; where a key is
   there with another value, leave it and report it, as setup does with DDEV ports the user chose.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P11. Does the host script install bootstrap packages?** The drop-in needs `visudo`, which comes
   with `sudo`; cloning needs `git`. Whether Debian's image has them is unconfirmed.
   *Recommendation:* yes: as root, install `sudo`, `git` and `ca-certificates` only when missing. It
   does not clone the repo; it prints the command.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P12. The sudoers drop-in's file name.** *Recommendation:* `/etc/sudoers.d/dev-bundle`, one line,
   `<user> ALL=(ALL:ALL) NOPASSWD: ALL`, mode 0440.
+  **Accepted 2026-11-11 (PR #2 review).** *Owner's note:* the file name must contain no dot, because
+  sudo skips files in `/etc/sudoers.d/` whose names contain one. `dev-bundle` meets that. The host
+  script says so in a `# v1:` comment where it writes the file.
 - **P13. How mkcert gets onto Windows.** *Recommendation:* use it if present (the native
   dev-setup-windows bundle may have installed it); otherwise install it with `winget`; if `winget` is
   missing, skip the step with a notice and let setup's S15 report say the CA is not shared.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P14. Does the host script ever shut WSL down?** A `.wslconfig` change needs `wsl --shutdown`,
   which stops every distro, Docker Desktop's included. *Recommendation:* never on its own. It
   terminates only the Debian distro, and only after it changed `wsl.conf`. For `.wslconfig` it prints
   the command, unless no distro is running.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P15. PowerShell version and encoding.** *Recommendation:* written for Windows PowerShell 5.1,
   which every Windows 11 has, and ASCII-only, so 5.1 cannot misread the file's encoding. CI parses it
   under 5.1.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P16. Docs: the refused flags' sections.** *Recommendation:* keep them in the forked checklist and
   demo doc under a one-line "not in v1" note, matching Q32 for code, rather than cutting them out and
   putting them back later.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P17. The host script's summary.** *Recommendation:* console only, in a form safe to paste; no log
   file on the Windows side in v1.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P18. Do fixes found during the d3 runs stay in v1?** AGENTS.md leaves it to the owner.
   *Recommendation:* yes: v1 has never been released, so there is no earlier v1 to protect. Each fix
   gets a dated finding in its comment and a line in the changelog entry.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P19. A GPU WARN and acceptance.** If Debian 13's Mesa has no d3d12 driver, the Godot section warns
   about software rendering on every run, and "WARNs only for optional credentials" cannot be met.
   *Recommendation:* accept it for v1 as a recorded known issue, written up in the gotchas doc, and do
   not add a non-Debian Mesa to the bundle.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P20. Is d4's run part of v1's acceptance?** *Recommendation:* no. Tag v1 after d3's clean run, as
   AGENTS.md's rule asks for a clean run "on a laptop"; then run d4 (and d1 for CUDA, C5 item 15) with
   per-machine flags, and let what d4 finds go into v2 and the per-machine notes. The release note says
   "confirmed on d3; d4 not yet run", and the bundle is not called done until d4 has run, which is what
   Q12 asks. The alternative, holding the tag for d4, delays v1 for findings that are mostly about AVX
   and would be v2 changes anyway.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P21. Editor sign-ins that return through a custom URL scheme.** Sent to the Windows browser, a
   sign-in that ends in `vscode://…` or `windsurf://…` lands on Windows, where nothing handles it. This
   came up while planning; it is not in the review. *Recommendation:* no code in v1. On the first run,
   try each editor's sign-in, note which complete (some poll instead of redirecting, some offer a code
   to paste), and write the working route into the gotchas doc. A Windows-side handler that forwards to
   WSL is a later host-script item.
+  **Accepted 2026-11-11 (PR #2 review).** *Owner's note:* add to the first-run observation, and as an
+  entry in `docs/wsl-gotchas.md`: if a native Windows VS Code is installed on the same laptop (for
+  example by dev-setup-windows), a `vscode://` sign-in link opens that Windows editor rather than the
+  one in WSL.
 - **P22. The Chromebook repo's `tests/` folder** (offline helper tests) was not copied into
   `reference/`. *Recommendation:* not ported in v1; decide after the first run which of them would have
   caught something.
+  **Accepted 2026-11-11 (PR #2 review).**
 - **P23. Confirm the two changes to the stage order** (section 2): the PowerShell CI job in stage 7
   with the script, and setup's leftover text items in stage 6. *Recommendation:* as written.
+  **Accepted 2026-11-11 (PR #2 review).**
