@@ -1,0 +1,29 @@
+# Everything the scripts write next to themselves: downloads, logs, disk reports, generated helpers,
+# and the installers you supply (InterBase, Antigravity tarballs, Cursor AppImage).
+assets/
+
+# Secrets never belong here. The scripts keep them in ~/.config/dev-init/secrets.env inside the WSL
+# distro, outside any repo; these lines catch a copy dropped in by mistake.
+secrets.env
+*.env
+.env.*
+*.pem
+*.key
+*.pfx
+id_ed25519*
+
+# Run output
+*.log
+*.tsv
+
+# Editors and OS
+__pycache__/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+# Windows Explorer leaves these behind, and copying a downloaded file from Windows into WSL adds a
+# <name>:Zone.Identifier file next to it.
+Thumbs.db
+desktop.ini
+*:Zone.Identifier

@@ -1,0 +1,8 @@
+# Line endings. The bash scripts run inside WSL, where a CR at the end of a line breaks them
+# ($'\r': command not found), so every text file is stored and checked out with LF, even when the repo is
+# cloned with Git for Windows and core.autocrlf=true.
+* text=auto eol=lf
+*.sh text eol=lf
+
+# The planned Windows-host PowerShell script is edited and run on Windows: CRLF there.
+*.ps1 text eol=crlf
