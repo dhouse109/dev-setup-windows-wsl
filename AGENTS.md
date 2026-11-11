@@ -48,8 +48,8 @@ MIT `LICENSE`.
 
 ## Target environment
 
-- **Windows 11 22H2 or later** (the minimum, because mirrored networking needs it), **WSL2, Debian 13
-  (trixie), x86-64.**
+- **Windows 11 22H2 or later** (the minimum, needed when mirrored networking comes with Q8), **WSL2,
+  Debian 13 (trixie), x86-64.**
 - Machines (details in `docs/plans/wsl-plan.md`, "Target machines"):
 
   | Machine | CPU | RAM | Disk | GPU |
@@ -73,13 +73,17 @@ MIT `LICENSE`.
     sandboxes, pipx and venv paths break, and it is slow. It lives in the Linux home.
   - **CRLF:** a script that passed through Windows Git or a Windows editor fails with
     `$'\r': command not found`. `.gitattributes` keeps every text file LF (`*.ps1` CRLF).
-  - **Memory cap:** WSL gets 50% of host RAM by default; inotify watches may be low. The host script
-    sizes `.wslconfig` (about 75% of host RAM, plus swap and sparse VHD); inotify via `sysctl`.
+  - **Memory cap:** WSL gets 50% of host RAM by default. The host script sizes `.wslconfig` (about 75%
+    of host RAM, plus swap, and `sparseVhd=true` written before the distro is installed).
+  - **inotify watches** may be low. The test's check is a WARN, not a FAIL, and its hint names the
+    `sysctl`; no setup or host-script step raises the limit unless a laptop shows it is needed.
   - **Docker Desktop:** its WSL integration conflicts with docker-ce inside the distro. The bundle uses
-    docker-ce; setup's preflight stops if the integration is on for this distro.
-  - Also: GPU is WSLg's `/dev/dxg` + Mesa D3D12 (no virgl, `renderD128` or sommelier); links open with
-    `wslview` in the Windows default browser; disk freed inside WSL does not return to Windows until the
-    VHDX is compacted.
+    docker-ce; setup's preflight stops if the integration is on for this distro. The host script checks
+    and reports it, and doesn't change Docker Desktop's settings.
+  - Also: GPU is WSLg's `/dev/dxg` + Mesa D3D12 (no virgl, `renderD128` or sommelier); links open in
+    the Windows default browser through the bundle's own opener in `~/.local/bin`, which calls Windows
+    by absolute path (no `wslu` / `wslview`); disk freed inside WSL does not return to Windows unless
+    the VHDX is sparse or is compacted.
 
 ## Where you are running
 
@@ -125,9 +129,9 @@ terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any 
    list of those places and the `grep` that must show only the new number come with the v1 build, once
    the forked scripts and the host script's version line exist (the Chromebook bundle's list is in
    `reference/dev-setup-chromebook/AGENTS.md`, rule 1).
-2. **CHANGELOG.md** has one section per script (five, including the host script), newest version first. Every version gets an entry under
-   every script; a script with no change gets "version bump only". Each entry says whether it ports to
-   dev-setup-chromebook (yes / no / n.a.).
+2. **CHANGELOG.md** has one section per script (five, including the host script), newest version first.
+   Every version gets an entry under every script; a script with no change gets "version bump only".
+   Each entry says whether it ports to dev-setup-chromebook (yes / no / n.a.).
 3. **Code comments carry the why**, tagged with the version that added them and, for fixes, the dated
    finding (`# v1: … (Nov 20 2026: …)`). Keep existing tagged comments; they are the design record.
    **Inherited comments:** the fork keeps the Chromebook scripts' tagged comments. A Crostini comment
@@ -183,9 +187,10 @@ terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any 
 Once the scripts exist, update in the same change:
 - all four bash scripts (flag expansion at minimum), and the host script if the change has a Windows side
 - the **"not yet supported on WSL" list**: flags not yet ported are refused at flag expansion from one
-  short list, and `install-all` skips them with a notice (v1's list: install-lan, install-lan-share,
-  install-android-native, install-retro, install-com; the v77–v101 review may add to it). A flag that
-  becomes supported comes off the list in all four scripts
+  short list. Naming a refused flag directly stops before anything installs, with the reason; any
+  group, including `install-all`, skips a refused member with a notice (v1's list: install-lan,
+  install-lan-share, install-android-native, install-retro, install-com; the v77–v101 review may add to
+  it). A flag that becomes supported comes off the list in all four scripts
 - test: checks for the new behaviour (`check` = FAIL if missing, `warn` for user-changeable settings),
   and the disk report's line for that stack
 - the init checklist doc: run order, flags, secrets variables, manual steps
