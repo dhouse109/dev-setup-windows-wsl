@@ -26,3 +26,6 @@ Current version: none yet.
 | [reference/dev-setup-chromebook/](reference/dev-setup-chromebook/) | Read-only copy of Chromebook v101, the fork source |
 | [AGENTS.md](AGENTS.md) | Working rules for coding agents (`CLAUDE.md` imports it) |
 
+## License
+
+MIT, see [LICENSE](LICENSE). Same terms and holder as the Chromebook bundle.
