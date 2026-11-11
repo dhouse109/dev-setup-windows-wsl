@@ -1,0 +1,379 @@
+# Crostini gotchas
+
+These are things that went wrong while building this bundle on ChromeOS's Linux (Debian 13, 8 GB
+Chromebooks), and what fixed each one. Every fix is in the scripts. Search them for the flag in brackets
+to see it in context; the comment above each fix usually tells the story.
+
+- **Dev-test printed its summary but never returned** (setup/test recorder, v99; Nov 1 2026).
+  New-shell startup checks can leave an `ssh-agent -D` running. Passing `>(_copy)` as script(1)'s
+  output filename let that agent inherit the recorder's extra pipe descriptor, even with standard
+  output/error redirected. The copy waited forever for EOF after the test itself exited.
+  **Fix:** send script(1)'s output through a separate tee/copy branch; its pipe descriptor no longer
+  reaches the recorded command or shell-startup agents. Keep waiting for the final saved lines and
+  preserve script(1)'s exit status. A separate child-subreaper supervisor now wraps every startup
+  probe, adopts its detached agents and stops only those descendants. PID/start-time ledgers verify
+  no test-owned agent remains before the summary and again on EXIT; pre-existing agents stay alive.
+- **dosfstools installed but `mkfs.fat` reported missing** (`install-retro`, v99; Nov 1 2026).
+  Normal user PATH can omit `/usr/sbin`, where Debian installs `mkfs.fat`. Both the test and generated
+  exchange helper now use `/usr/sbin/mkfs.fat`; package presence alone did not prove helper operation.
+
+- **Typesense exits 139 before logging** (`install-typesense`, v99; Nov 1 2026, eldrid).
+  `/proc/self/io` is missing in this ChromeOS kernel. Typesense 30.2's bundled brpc samples it in a
+  global constructor, then logs the missing-file error through glog before initialization and
+  segfaults. Even `--version` crashes, with empty Docker logs; gdb confirms the static-init chain.
+  See [Typesense #2998](https://github.com/typesense/typesense/issues/2998) and
+  [brpc #3184](https://github.com/apache/brpc/pull/3184).
+  **Fix:** the upstream-documented `fopen` shim, compiled from embedded source into
+  `assets/tools/typesense`, mounted read-only and preloaded only in Typesense when the host lacks
+  that file. Only an ENOENT read of `/proc/self/io` receives zero counters, with one explicit warning;
+  real kernel counters, access errors and other paths are unchanged. This disables only the unavailable
+  process-I/O metric, not database writes, search or other monitoring. Keep the vendor image, existing
+  data volume and resource limits. Remove the workaround after a released upstream image fixes it.
+
+- **Oracle clock-drift errors after long uptime under memory pressure** (`install-oracle`, v99;
+  Nov 1 2026). Oracle can log time-drift errors and terminate its instance in these conditions.
+  In acceptance, the first startup failed with clock-drift errors; closing other windows and
+  restarting Linux cleared the condition, and the repeated Oracle round trip passed.
+  Restart Linux before retrying when this pattern occurs. This observation does not establish the
+  cause of a separate terminal reset; do not change database settings or merely increase its wait
+  limit without further evidence.
+
+## Graphics
+
+- **Windowed OpenGL falls back to software rendering** (setup base). Crostini hands Linux a virgl GPU as
+  `/dev/dri/renderD128`, which belongs to the `render` group. The default user is only in `video`, so Godot,
+  Flutter desktop, Android Studio's previews and Chrome's WebGL silently use llvmpipe.
+  **Fix:** `usermod -aG video,render $USER`, then shut Linux down and reopen it.
+- **There is no Vulkan** (`install-godot`). Only OpenGL comes through. Godot's Forward+ and Mobile renderers
+  need Vulkan, so the `godot` launchers default to `--rendering-driver opengl3`.
+  **Fix:** pick the Compatibility renderer for new projects.
+- **Android Studio's window dims while it has focus** (`install-android-native`). This happens under
+  ChromeOS's Wayland, with the IDE's JetBrains runtime.
+  **Fix:** `-Dawt.toolkit.name=XToolkit` in its VM options.
+- **Devin Desktop (Windsurf) freezes or closes under Wayland** (`install-windsurf`, v96). On ChromeOS's Wayland
+  its window froze at sign-in (62 s of silence, then `Fatal Wayland communication error: Broken pipe`) or
+  vanished ("clean-exit"), with or without extensions (Oct 26 2026). **Fix:** `--ozone-platform=x11`
+  (XWayland), through a wrapper, `~/.local/bin/devin-desktop`, and its own launcher entry, "Devin (X11)".
+  Two launcher traps: the ChromeOS launcher ignored an edited copy of `devin-desktop.desktop` with the same
+  file name in `~/.local/share/applications` (the icon still started it on Wayland), so the fix is a
+  separately named entry; and the entry must run `/usr/bin/devin-desktop` (the CLI script, which sets
+  `VSCODE_CLI`), not the Electron binary the stock entry runs, which resolved the shell environment itself
+  and crashed within 5 s every time. The freezes that came back on X11 were memory (see Memory and disk).
+- **GTK2 dialogs in Lazarus draw blank and freeze** (`install-lazarus`, v94). The SourceForge IDE is built on
+  GTK2. Under Crostini some of its modal dialogs (Run Parameters, New Project) drew blank until resized and
+  never took keyboard focus, while Tools → Options worked. Removing `gtk2-engines-pixbuf` didn't help, and
+  GTK2 theming (`gnome-themes-extra`, Adwaita-dark gtkrc) doesn't touch the cause.
+  **Fix:** setup rebuilds the IDE with `lazbuild --build-ide= --ws=qt5` (needs `libqt5pas-dev`, and a
+  user-owned `/usr/share/lazarus/<ver>/units/x86_64-linux/qt5`, or the final make step stops with "mkdir:
+  Permission denied"). `lazbuild --add-package` also saves the packages to the profile's install list
+  (`StaticAutoInstallPackages` in `miscellaneousoptions.xml`), and every later `--build-ide` builds them in;
+  the IDE installs packages the same way, rebuilding itself from that list. So the floating build runs with
+  the docking packages out of it, and since v95 the list names them exactly while docked is active, so the
+  IDE's own rebuild (Package → Install/Uninstall Packages, or a project's install prompt) keeps its layout
+  and `lazmode` adopts the result. On Oct 25 2026 that rebuild stayed on Qt5; should one come out GTK2,
+  `lazmode` keeps it aside and puts the Qt5 layout back.
+  **The IDE's own rebuild came out GTK2 on a fresh profile** (v96). On Oct 27 2026 the dark docked IDE,
+  set up by v96, installed lazdaemon for TDaemon, rebuilt itself and came back light with a blank white
+  dialog. The IDE's own rebuild uses the widgetset of its build profile (Tools → Configure Build Lazarus,
+  `LCLPlatform` under `BuildLazarusOptions/Profiles` in `miscellaneousoptions.xml`). lazbuild's `--ws=qt5`
+  sets that only in memory, and its `--add-package` saves the profiles with Lazarus's defaults: gtk2 in
+  all four, on Linux. **Fix:** `lazmode` changes gtk2 to qt5 in every build profile after its builds and
+  in `lazmode status`, which setup runs for both profiles. A widgetset you chose yourself is left alone,
+  and nothing is changed while Lazarus runs, because the IDE saves its options on exit. The dark look comes from qt5ct
+  (`QT_QPA_PLATFORMTHEME=qt5ct`); ChromeOS draws the title bars, so no Linux theme changes them.
+  `startlazarus` buffers its output, so `--debug-log` and `tee` logs are cut off when a hung IDE is killed
+  and don't help diagnose a hang.
+
+## Network
+
+- **v101 guest HTTP evidence:** use the fixed-marker procedure in
+  [guest-network-tests.md](guest-network-tests.md). Wine reaches host loopback;
+  QEMU user networking exposes the host at 10.0.2.2. Verify the installed DOSBox-X
+  slirp alias separately. Peer HTTP uses the first/user NIC and a listener bound
+  explicitly to the peer Tailscale address. Guest DNS need not inherit MagicDNS;
+  a name failure after IPv4 success is a separate result. Legacy HTTPS failures
+  do not invalidate a successful controlled plain-HTTP marker.
+
+- **v101 NT/2000 local second adapter:** the supported `lan` command uses loopback
+  UDP between the two QEMU processes. It does not need ChromeOS forwarding or
+  Tailscale. Preserve the second adapter's MAC and recorded PCI identity during
+  [manual adoption](guest-lan.md); a moved adapter can lose static IP/WINS or be
+  detected as new hardware. Keep its gateway blank so the original user NIC keeps
+  internet routing. Remote encapsulation/MTU work belongs to companion F6.
+
+- **NuGet / PowerShell Gallery hang on IPv6** (v100; Nov 2 2026). The owner confirmed IPv4 succeeds where api.nuget.org over IPv6 hangs. Bundle acquisition and implicit restore/build commands use `DOTNET_SYSTEM_NET_DISABLEIPV6=1` only in their child process; this includes generated demo runners and Godot .NET builds. No shell profile or system IPv6 policy is changed. Dev-test makes a bounded .NET service-index request and warns on network/DNS failure; it does not infer that every network error is IPv6.
+
+
+- **One dropped pip download ended the whole setup** (`install-agentic`, v99; Oct 31 2026). The v98 run
+  ended at an unhandled ConnectionResetError; pip's own partial retry did not recover. **Fix:** exported
+  pip retry/socket settings (resume retries when supported), three-attempt bulk-install retries with
+  2s/5s backoff, and early managed apt retries/timeouts. Vendor streaming installers are fetched fully
+  before execution. Only exhausted optional bulk retries continue to independent blocks; other errors
+  abort with stage/EXIT reporting and rerun flags. Reports live in assets, not in loose home files.
+- **Apt printed 64,364 copies of one font warning** (`install-playwright`, v99; Oct 31 2026). The font
+  actually installed; Debian apt 3.0.3's delayed acquisition queue emitted the same warning repeatedly
+  ([Debian #1111554](https://bugs.debian.org/1111554), moved to debug output in 3.1.8). **Fix:** separate
+  upstream's version-specific dependency install from browser downloads and count only identical
+  consecutive delayed-item warnings before terminal/log capture. Other diagnostics and both producer
+  and filter status survive. Retries/filtering do not repair apt's queue; don't add unstable apt feeds.
+
+- **Downloads hang on IPv6** (setup base). A Linux VM can get IPv6 addresses with no route out. `wget` then
+  waits on one IPv6 address after another, while the ChromeOS browser works because it races IPv4 against
+  IPv6. **Fix:** setup detects this and adds `precedence ::ffff:0:0/96 100` to `/etc/gai.conf`, plus
+  `Acquire::ForceIPv4` for apt. Every wget and curl also gets a 20-second connect timeout.
+- **Linux port forwarding is gone** (`install-lan`). On these Chromebooks, new Linux installs since ChromeOS
+  147 run as a full VM, with no port forwarding from ChromeOS. Other laptops can't reach a service in
+  Linux. **Fix:** Tailscale.
+- **Tailscale starts in userspace mode** (`install-lan`). In this VM `tailscaled` picked userspace
+  networking by itself, so there was no `tailscale0` interface and Linux tools couldn't reach the 100.x
+  addresses. **Fix:** `FLAGS="--tun=tailscale0"` in `/etc/default/tailscaled`.
+- **Links from Linux open in Linux Chrome** (setup base, v96). The base install's Google Chrome registers
+  itself as Linux's handler for web links, so a sign-in page or a dev server's `--open` started a second
+  Chrome inside the VM's memory, without your ChromeOS sign-ins (Devin Desktop's Login did, Oct 26 2026).
+  `xdg-settings set default-web-browser` refuses ("$BROWSER is set": ChromeOS sets
+  `BROWSER=/usr/bin/garcon-url-handler`), and `xdg-open` checks the MIME registration first anyway.
+  **Fix:** `xdg-mime default garcon_host_browser.desktop x-scheme-handler/https x-scheme-handler/http
+  text/html`. `localhost` and `127.0.0.1` still reach Linux from ChromeOS's browser, so dev servers and
+  localhost sign-in callbacks work.
+- **ChromeOS doesn't pass ports 80 and 443 to Linux** (setup base, v96). High ports reach Linux from
+  ChromeOS's browser, 80 and 443 don't: a DDEV site on the default router ports gave
+  `ERR_CONNECTION_REFUSED`, while its direct port and the router on 8080/8443 opened (Oct 26 2026).
+  **Fix:** `ddev config global --router-http-port=8080 --router-https-port=8443`, then `ddev poweroff`;
+  sites are `https://<site>.ddev.site:8443`. mkcert's CA is trusted in Linux only, so ChromeOS's browser
+  warns until the CA is imported there by hand (the init checklist has the steps).
+- **Ollama answers 403 to a plain hostname** (`install-lan`). Ollama refuses a `Host:` it doesn't
+  recognise. **Fix:** the address book also writes `NAME.internal` names, which it accepts.
+- **The GitHub API rate-limits anonymous calls** (many flags). It allows 60 calls an hour per IP, then
+  returns 403 in the middle of a run. **Fix:** release tags come from the `releases/latest` redirect, which
+  isn't rate-limited.
+
+## Memory and disk
+
+- **Linux sees about 6.4 GB of an 8 GB Chromebook.** SQL Server and Oracle hold about 2 GB each while
+  running, and Solr, OpenSearch, Elasticsearch, Milvus and Atlas Local hold 1–3 GB. **Fix:** setup creates
+  them stopped. `mssql up`, `oracle up` and `devsvc up` stop the other heavy engines first and check a
+  memory budget (`DEVSVC_RAM_MB`).
+- **ChromeOS takes memory back from Linux** (setup base, v96). The Linux VM's "used" memory includes what
+  ChromeOS has reclaimed from it for itself: on Oct 26 2026 Linux showed 4.9 GB of 6.4 GB used, but its
+  processes held only 2.2 GB (Devin Desktop 1.65 GB of it) and slab plus shmem about 0.2 GB, so ChromeOS had
+  taken about 2.5 GB. There is no swap, so when a 2 GB Electron IDE runs out it freezes or closes instead of
+  slowing down. To tell: add up the processes (`ps`, or better PSS from `/proc/*/smaps_rollup`) and compare
+  with `free`. **Fix:** `devmem` does that arithmetic ("taken back by ChromeOS (estimate)"), names the top
+  programs and the bundle's running containers, and says what to close; `devmem --watch` follows it while
+  something misbehaves. What helps: keep ChromeOS's tabs and Android apps light while a heavy Linux app is
+  open (Search + Esc shows them), close Linux's Google Chrome, run one heavy engine at a time.
+- **`vm.max_map_count` can't be raised from inside the container** (`install-search`). OpenSearch and
+  Elasticsearch normally insist on it. **Fix:** `node.store.allow_mmap=false`, so they don't need it, and
+  their disk watermarks are off, so a nearly full disk doesn't turn an index read-only.
+- **`/tmp` is RAM-backed.** Large downloads and the test script's scratch space live on disk instead
+  (`./assets`, and the test's own work folder).
+- **Disk: caches fill it, and a full disk breaks DDEV** (setup base, v96). On Oct 26 2026 DDEV's image pull ran
+  dragonair's 38 GB disk out of space twice. The full disk left `~/.ddev/.state.yaml` and `~/.ddev/.update` at
+  0 bytes, and every later `ddev start` panicked ("assignment to entry in nil map" in `remoteconfig`) until the two
+  files were moved aside (DDEV rewrites them). What had filled the disk was mostly caches: npm 2.3 GB, Docker's
+  build cache 2.7 GB (which `docker system df` called only 16 kB reclaimable; `docker builder prune -af` freed
+  it), uv 641 MB, Homebrew 264 MB, Linux Chrome's cache 189 MB, pnpm 172 MB, Go's build cache 133 MB, Composer
+  61 MB, plus apt. DDEV's images want about 3 GB free. **Fix:** `devclean` reports what each cache would free and
+  changes nothing; `devclean --run` clears them and moves a 0-byte `~/.ddev/.state.yaml` aside (the one that
+  panics; `~/.ddev/.update` is always 0 bytes, DDEV reads only its date, so since v97 it is left alone); `--images` also removes
+  Docker images no container uses. Never `docker system prune`: the bundle's services are containers created
+  stopped, and it deletes them.
+- **Editors keep what they no longer need** (setup base, v97). On Oct 26 2026 a 30 GB disk set up the same morning
+  went from 16.6 GB free to 4.6 GB in three hours. VS Code keeps a copy of every extension package it downloads in
+  `~/.config/Code/CachedExtensionVSIXs` (1.7 GB; Cursor and Devin do the same), and rolling an extension back
+  leaves the newer version's folder in `~/.vscode/extensions` (Codex 26.1021.22027, 1.2 GB). Linux Chrome's
+  profile kept most of 1.1 GB in caches. **Fix:** `devclean` reports them and `devclean --run` clears them, each
+  only while that program is closed; the installed extension versions, the editors' `User` folders and the
+  Chrome profile itself stay.
+- **Docker 29 keeps images under `/var/lib/containerd`** (v97). `/var/lib/docker` showed 952 KB while
+  `/var/lib/containerd` held 3.3 GB (mostly DDEV's six images), so `du` on the Docker folder alone misses them.
+  And Docker's build cache can't be freed in full while images built from it share its layers: a 2.7 GB cache,
+  emptied, freed less. **Fix:** `devclean --where` reads both folders (with `sudo -n` when allowed) and shows
+  `docker system df`; `devclean`'s build-cache line says "up to".
+- **Deleted space comes back late** (v97, found in the v97 Chromebook run, Oct 27 2026). The Linux disk is btrfs,
+  which releases deleted space at its next transaction commit, so `df` read right after an `rm` misses part of it
+  (`devclean --run` credited npm with 553 MB of 668 MB and Composer with 218 MB of 49 MB). **Fix:** `devclean`
+  runs `sync` before each `df` reading. By hand: `sync; df -h ~`.
+- **`uv cache prune` keeps nearly everything** (v97, found in the v97 Chromebook runs, Oct 27 2026). It removes
+  only cache entries nothing references, and freed 0 B of a 548 MB cache twice. Hard links weren't the reason
+  (counting only files with one link changed nothing; uv's default link mode on Linux is a copy-on-write clone).
+  **Fix:** `devclean --run` uses `uv cache clean`, which empties the cache; uv's tool environments and Pythons
+  live in `~/.local/share/uv`, so nothing installed breaks, and `uvx`'s throwaway environments come back on
+  their next run. The report gives the cache's whole size, "up to": blocks an environment shares with it as a
+  clone stay in use. Setup upgrades aider in place since v97 (`uv tool upgrade`), so a setup run after
+  `devclean --run` no longer downloads all of aider again; before, its `--force` reinstall did, and a dropped
+  connection there stopped setup (Oct 27 2026).
+- **kind works in Crostini's Docker** (`install-k8s`). A cluster takes about 2 GB, so the test unloads
+  Ollama's models first.
+
+## Packages and PATH
+
+- **Random password generation printed Broken pipe** (SQL Server, Oracle and devsvc, v99; Oct 31 2026).
+  `tr < /dev/urandom | head` closes the reader early; without pipefail the last command hides the
+  producer error, and surrounding printf/assignments can mask it even with pipefail. **Fix:** finite
+  Python secrets generation, checked before storing credentials. LDAP's latent copies use it too;
+  existing configured passwords are kept. This is a shell issue, not a ChromeOS-specific failure.
+- **Apt couldn't read a local .deb as `_apt`** (Symfony CLI / Redis Insight, v99; Oct 31 2026).
+  `mktemp -d` is private (0700). **Fix:** verify privately first, then chmod only that temp directory
+  (0755) and public package (0644) for apt-get. MongoDB clients use the same pattern. Never disable the
+  apt sandbox or broaden home/config permissions. Unattended package calls use apt-get.
+- **Antigravity printed ERROR for successful info messages** (v99 investigation, Oct 31 2026).
+  Its upstream Google logger runs before initialization; the following installation succeeds. Its
+  local-bin prepend duplicates PATH entries but does not reverse Debian/Homebrew ordering. Keep the
+  diagnostics and managed Homebrew block; dev-test checks the installed agy plus lookup order.
+- **Upstream notices can accompany successful installs** (v99 investigation, Oct 31 2026): sdkmanager
+  deprecation, EAS/npm deprecated transitives, brew's Landlock ABI 10 requirement on an ABI 3 kernel,
+  and RDoc scanning an http-parser fixture. Keep functional checks; no dependency override, Android
+  migration, kernel/sandbox bypass or removal of local RI docs is made for these notices. Java's
+  initial “No JRE found” notice is followed by its certificate trigger; dev-test checks the trust store.
+
+- **Homebrew shadows Debian** (setup base). Formula dependencies bring their own python3, sqlite3, `as`,
+  `ld` and openjdk, and Homebrew's `shellenv` puts them ahead of Debian's. **Fix:** a marked `~/.bashrc`
+  block moves Homebrew's directories to the end of PATH. `brew unlink openjdk` keeps `java` on Debian's JDK.
+- **A PATH block moved below the lines that need it** (v74). Rewriting a `~/.bashrc` block by deleting it
+  and appending it again put it below a `kubectl` completion line, and every new terminal said
+  `kubectl: command not found`. **Fix:** marked blocks are rewritten in place.
+- **aider needs Python ≤ 3.12, trixie has 3.13** (`install-node`).
+  **Fix:** `uv tool install --python 3.12 aider-chat`, which fetches a managed 3.12.
+- **npm 12 blocks dependency install scripts** (`install-node` and others). Global CLIs with native
+  modules then install broken. **Fix:** `npm install -g --allow-scripts=<names>`, with the names listed per
+  package.
+- **Debian trixie renamed `libaio.so.1` to `libaio.so.1t64`** (`install-oracle`). Oracle Instant Client
+  links against the old name. **Fix:** one compatibility link in the system library directory.
+- **Firebird's embedded lock directory** (`install-db`). If another user created `/tmp/firebird` first,
+  every embedded open fails. **Fix:** setup probes once and, only if needed, sets a private
+  `FIREBIRD_LOCK`.
+- **An editor started from its icon can miss your PATH** (dev-test base, v96). VS Code-based editors
+  started from a launcher icon run your login shell (`bash -i -l`) to read its environment and give up
+  after 10 s, with "Unable to resolve your shell environment in a reasonable time" in the log (Devin
+  Desktop, Oct 26 2026). The editor, its terminal tasks and extensions then run without what `~/.bashrc`
+  adds to PATH (`~/.local/bin`, nvm's Node, `~/.cargo/bin` and the rest), and nothing says why. VS Code
+  and Cursor still do this from their icons; Devin's icon goes through `/usr/bin/devin-desktop` since v96,
+  which skips the step. **Fix:** keep a new login shell fast. dev-test times it (median of three runs,
+  WARN from 5 s, FAIL from 10 s) and on a WARN or FAIL lists the five slowest lines of a traced run.
+- **The docker group isn't active in the run that adds you to it.** Group changes apply to new logins, so
+  setup's own Docker calls go through `sudo`, and the helper commands fall back to `sudo -n docker`.
+
+## Android
+
+- **The Android emulator doesn't run in Crostini** (`install-android-native`).
+  **Fix:** deploy to the Chromebook's own Android runtime. Turn on ADB debugging in ChromeOS's Linux
+  settings, then `adb connect arc`.
+
+## Databases
+
+- **Oracle Free's Lite image ignored `ORACLE_PWD`** (`install-oracle`). Every login failed with ORA-01017.
+  **Fix:** the first `oracle up` of a new data volume runs the image's own `setPassword.sh`.
+- **InterBase's installer leaves `ibmgr` root-only** (`install-interbase`). Checks run as the user then see
+  no server manager. **Fix:** setup gives `bin/` tools the execute bit for everyone. A related trap: the
+  unregistered Developer Edition server spins at 100% CPU without ever listening, so setup no longer
+  starts it before registration.
+- **InterBase's `isql -q` exits 1 even when `CREATE DATABASE` worked** (`install-interbase`).
+  **Fix:** the test drops `-q`.
+
+## Lazarus and Free Pascal
+
+- **"This binary has no thread support compiled in", runtime error 232** (`install-lazarus`, v96). Not
+  Crostini-specific (any Linux does it), but this is where it bit: Lazarus's TDaemon example stopped on
+  `sudo ./TestDaemon -r` (Oct 26 2026). On Linux the RTL has no thread manager until `cthreads` is the first
+  unit loaded, and Lazarus's templates and examples load it only behind `{$IFDEF UseCThreads}`.
+  **Fix:** `-dUseCThreads` in `~/.fpc.cfg`, which must `#INCLUDE` the system `fpc.cfg` (fpc reads only the
+  first config it finds); rebuild an older project once with Run → Clean up and Build.
+- **The docked build opened undocked** (`install-lazarus`, v96). Not Crostini-specific: Lazarus 4's
+  AnchorDockingDsgn docks the IDE only when `<profile>/anchordockingoptions.xml` says
+  `EnableAnchorDock=True`. Until `DoneAskUserEnableAnchorDock` is True, the first start asks single
+  window or multi window and saves the answer there; both default to False. On Oct 27 2026 multi window was
+  picked at the light profile's first start, so its docked build opened undocked while `lazmode status`
+  said docked and dev-test passed.
+  **Fix:** `lazmode` writes the file with both True when it's missing (setup, both profiles), and
+  `lazmode dock on` turns docking on. Status, init and dev-test report docked-but-off, and
+  `lazmode dock off` keeps multi window with the floating build.
+
+## Retro
+
+- **Win95 IDE boot hang and redraw** (v100; Nov 5 2026). win95 boots image disks only; the separate IMGMAKE session still mounts X:. New win95 setup.conf/boot.conf use `output=surface` to fix maximized redraw. Keep guests off when editing output/scaler settings; do not change them from the Video menu during Setup. Untouched v99 `output=opengl` lines upgrade to surface once per file (trailing spaces allowed), atomically recording `# v100: defaults reviewed`. New files start marked. Keep the marker: restoring old values or deleting keys is respected afterwards. Edited/duplicate settings are preserved and marked reviewed too. All four DOSBox-X configs default to `[dosbox] hostkey=ctrlshift` (Ctrl+Shift+F for full screen); existing choices stay, and misplaced hostkey lines require manual review. Missing defaults are added only while the guest is stopped; win31 stays opengl and DOS stays ttf. Review owner-added folder mounts in win95 `[autoexec]` before booting; they are never removed automatically.
+
+
+- **Delphi 1's IDE crashes in a shared Wine prefix** (`install-retro`). It fails with a `winevdm.exe` page
+  fault. **Fix:** give it its own 32-bit prefix inside a Wine virtual desktop, with integrated debugging
+  turned off.
+- **KVM availability is not the guest's configured choice** (v100). NT 4.0's auto mode uses KVM
+  when usable, otherwise TCG; win2000 defaults to intentional TCG after the Nov 5 boot finding.
+  `<guest> accel` reports selection/reason. Windows 3.1/95 use DOSBox-X and do not need KVM.
+
+- **Windows 2000 boot stalls, tablet scaling and noisy audio** (v100; Nov 5–6 2026).
+  New defaults are TCG, zoom-to-fit off and no sound. Untouched v99 ACCEL, DISPLAY_OPTS and
+  SOUND lines upgrade too: the full original value/comment/spacing must match (trailing spaces
+  allowed). Review runs once per file and atomically records `# v100: defaults reviewed`; new
+  files start marked. Keep the marker: restored old values/deleted keys are preserved afterwards.
+  Ambiguous/duplicate settings receive only the marker; running guests defer without marking. TCG completed
+  Setup where the previous selection stalled. Disabling sound alone did not fix the boot.
+  NT 4.0 remains auto, with TCG documented as an untested fallback. QEMU exchange attachment is
+  deferred until installed desktop + shutdown + exchange enable, preventing a preformatted disk
+  taking C: during Setup. See the init checklist and STEPS-winnt.md for existing installs/recovery.
+
+- **Windows 2000 KVM irqchip workaround is unavailable under ChromeOS** (v101; owner report
+  Nov 9 2026). Item 3A used its one-session budget with six variants. The TCG baseline boots;
+  KVM still stalls at "Starting up…" with `VIDEO=std`, with `CPU=pentium2`, and with
+  `kernel-irqchip=split`. QEMU refuses `MACHINE=pc,kernel-irqchip=off` with
+  "KVM does not support userspace APIC": irqchip-off is unavailable under the tested ChromeOS
+  KVM environment, not a working workaround. No KVM fix was found. Windows 2000 defaults remain
+  TCG and `SOUND=none`. Audio was not retested because KVM did not boot; these results do not
+  establish an audio fix.
+
+- **Windows 95 NE2000 and COM2** (v100; Nov 5 2026).
+  `win95 net on` uses slirp without raw-network permissions; IRQ3 requires COM2 disabled. Only an
+  absent serial2 is filled; custom conflicts/blocks require manual review. Use Tailscale IPv4
+  addresses for other laptops; guest NAT is not an inbound bridge. See the checklist/STEPS-delphi.md.
+
+- **DOSBox-X full-screen focus and live renderer changes** (v100; Nov 5–6 2026). Switching windows
+  can lose focus: click the picture, then use the mapper/host-key recovery described in the retro
+  STEPS. Shortcuts are verified by the owner during acceptance; Ctrl+Shift+F is the new host-key
+  fullscreen combination, while existing choices remain. Change output/scaler only in config with
+  the guest off; a live Video-menu change spoiled one Windows 95 Setup. The blind Ctrl+Esc, U,
+  Enter shutdown observation is Windows 95-specific, not a DOS/win31/NT procedure. No maximize default.
+
+
+### v101 QEMU smoke-test evidence
+
+The headless blank-disk test keeps stderr, timestamped QMP events and a result record under
+`assets/logs/retro-qemu-<run-stamp>/`, even when its outer timeout fails. It reports the selected
+accelerator and failure phase, then bounds quit/TERM/KILL cleanup for its own child. It never
+opens an installed guest disk or retries a KVM failure into a PASS. `quick` skips this real probe.
+Read those diagnostics before attributing a stall to KVM; the v100 timeout's cause is unproven.
+
+
+### v101 retro profiles and NT CPU
+
+New NT 4.0 configs use CPU=pentium after the observed Pentium III hal.dll STOP. Existing simple
+configs upgrade only the untouched v100 CPU template (or an absent CPU) once, recording
+`# v101: NT CPU reviewed`. Edited/duplicate/complex settings stay; running guests defer and
+symlink configs stay untouched. Keep both v100 and v101 review markers: later restored/deleted
+settings are owner choices. Windows 2000's CPU and TCG/no-sound defaults stay unchanged.
+
+For NT's drifting PS/2 pointer, use View > Grab On Hover/click capture, Ctrl+Alt+G to release and a
+slower speed in Control Panel > Mouse > Motion. Install NT's Cirrus driver for better drawing;
+skip the display Test button. No USB tablet or VMware mouse driver is added. NT KVM/TCG speed
+remains an owner-run check. The bounded Windows 2000 KVM investigation is recorded above;
+audio was not retested.
+
+For a windowed win95 profile, keep `[sdl] output=surface` for maximized redraw. For the owner's
+full-screen stretching profile, edit the stopped guest's config to `[sdl] output=opengl` with
+`fullresolution=desktop` and `[render] aspect=false`, then use Ctrl+Shift+F with the default mapper.
+Stretching can distort aspect ratio and OpenGL may flicker in a maximized window. win31 retains
+OpenGL; verify its full-screen profile separately. DOS text stays ttf. Valid recognized renderer
+choices are informational; missing/duplicate/unrecognized values and unsafe mounts still WARN.
+Never edit the renderer from the live Video menu during Setup.
+
+The owner's Delphi 3 OLEnterprise Object Agent hung/crashed win95 with the dynamic core.
+Owner checked Nov 9 2026: `win95 --core normal` boots with the agent starting. With the guest
+shut down, set `core=normal` in the `[cpu]` section of `~/win95/boot.conf`; the owner confirmed
+this persists across plain `win95` boots. Setup already uses normal.
+
+The confirmed startup entry is in `HKLM\Software\Microsoft\Windows\CurrentVersion\RunServices`:
+value `Object Factory` = `C:\Program Files\Borland\OLEnterprise\bin\objfact.exe`.
+It runs during boot, before logon. The owner keeps it enabled for a possible later OLEnterprise
+transport. If disabling it is later desired, use Registry Editor to export the `RunServices`
+key first, then delete only the `Object Factory` value. Keep the key, other values and the
+OLEnterprise installation. This normal-core finding applies to that installation; other RPC
+software has not been verified.

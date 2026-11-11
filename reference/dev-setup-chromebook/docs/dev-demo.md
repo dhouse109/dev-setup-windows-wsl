@@ -1,0 +1,404 @@
+# dev-demo: the demos and their disk footprint
+
+*Working notes kept alongside the scripts, copied at the v93 release, updated for v96. The "since vNN" remarks date each behaviour; [CHANGELOG.md](../CHANGELOG.md) has the full story.*
+
+A full `dev-demo-chromebook.sh install-all` downloads about 1 GB; running every demo once adds roughly 20–25 GB, mostly outside `~/dev-demo`.
+
+
+Since v100, the C#/VB Spectre runners, VB project creation, PowerShell Gallery acquisition and Reqnroll restore/build runner scope `DOTNET_SYSTEM_NET_DISABLEIPV6=1` to their .NET child processes. Rerun dev-demo without refresh to rewrite runners while keeping projects/modules. Prove acquisition on an uncached dependency when checking the Nov 2 hang fix; cached runs alone are inconclusive.
+
+## Download footprint
+
+The download itself is about 1 GB, and Godot's demo projects are half of it. Sizes come from a sandbox run of v75 with every demo fetched, except where marked as an estimate.
+
+| Demo | Size in `~/dev-demo` |
+|---|---|
+| godot/demo-projects | 530 MB |
+| web/drupal-umami (Composer project) | \~150 MB (estimate) |
+| cpp/raylib | 146 MB |
+| lazarus/examples + pwsh/spectre-demo module (since v94 the Lazarus launcher asks light or dark when setup built the dark profile: `run-examples.sh <project> dark` skips the menu; the IDE builds themselves come from setup, not dev-demo) | \~70 MB (estimate) |
+| android-native/jetnews | 10 MB |
+| agentic/temporal-ai-agent | 7 MB |
+| rust/ratatui | 7 MB |
+| go/bubbletea | 6 MB |
+| db/chinook (4 engines + nwind.mdb) | 6 MB |
+| drupal/drupal-rag (DDEV config, seed script and launcher; the site itself arrives on first launch, v80) | under 1 MB |
+| drupal/drupal-ldap (DDEV config, configure script and launcher; the site itself arrives on first launch, v83) | under 1 MB |
+| db/firebird (SQL scripts and a small Lazarus program, v80) | under 1 MB |
+| db/servers (T-SQL and PL/SQL scripts and a launcher; the servers come from setup, v82) | under 1 MB |
+| net/mcp-hello (MCP server, client and launcher, v84) | under 1 MB |
+| com/hello-com (COM sources, build.sh and launcher; the toolchain comes from setup, v85) | under 1 MB |
+| retro/matrix (DOS/Windows source, build.sh, STEPS-delphi1.md and, since v92, STEPS-winnt.md; the toolchain and the retro guests come from setup, v85; a guest's own disk grows in \~/<guest>, outside \~/dev-demo) | under 1 MB |
+| agents/hermes and agents/openclaw (a stand-in model, an offline script, a skill of your own and launchers; the agents come from setup, v86) | under 1 MB |
+| laravel/links (the files that turn the Laravel skeleton into the demo, and a launcher; the app arrives on first launch, v87) | under 1 MB |
+| symfony/links (the files that turn a Symfony webapp into the demo, and a launcher; the app arrives on first launch, v88) | under 1 MB |
+| services/search-bakeoff (Apache Solr's example films, bakeoff.py and a launcher; the engines come from setup, v89) | under 1 MB |
+| services/redis and services/mongodb (generated tour scripts; MongoDB's holds its own copy of the films, v89) | under 1 MB each |
+| agents/fastmcp (a films MCP server, a FastAPI app around it and a launcher, v89) | under 1 MB |
+| graphql/apollo-supergraph (Solr's example films, a Python films subgraph, a Node reviews subgraph, router and MCP configuration, v90) | under 1 MB |
+| drupal/drupal-graphql (the launcher, configure.php, the kitchen subgraph and the gq.py helper; the two Drupal sites come on first serve, v90) | under 1 MB |
+| testing/e2e-bakeoff (the links app, features/links.feature, one folder per runner and a launcher; packages arrive on each runner's first run, v91) | under 1 MB |
+| drupal/drupal-behat (behat.yml, the features, FeatureContext and a launcher; the DDEV site and its Selenium add-on come on first serve, v91) | under 1 MB |
+| vue/vue-links, drupal/drupal-nuxt and gitlab/ci-local (generated Vue, Nuxt and module sources and launchers; packages, Drupal and pipeline images arrive on first use, v91) | under 1 MB each |
+| drupal/drupal-astro and drupal/umami-headless (generated Astro sources and launchers; Astro's packages and the shared Drupal site arrive on first use, v96) | under 1 MB each |
+| iac/cm-bakeoff (generated Ansible playbook, Puppet module, Chef cookbook, InSpec profile and Dockerfiles; the images build on first use, v91) | under 1 MB |
+| cloud/cloudflare (a Worker, its D1 migration and a launcher, v89) | under 1 MB |
+| retro/delphi/advanced-demo (v101 foundation docs, NOT RUN results template and minimal launcher; owner work excluded) | under 0.1 MB generated text |
+| All other demos | under 3 MB each |
+| **Total** | **about 1 GB** |
+
+## After running each demo once
+
+First launches add roughly 20–25 GB (estimated), because they build code, install dependencies and pull Docker images. Most of it lands outside `~/dev-demo`.
+
+| What | Where it lands | Approx. size |
+|---|---|---|
+| Docker images: voting app, Postgres, MariaDB, SQL Server, Langfuse stack, DDEV + Drupal CMS, kind node, Azurite, GCP emulator, debian:trixie-slim (Ansible, v76), pgvector/pgvector:pg17 and curlimages/curl (Drupal RAG and the container check, v80) | Docker's storage | 11–13 GB |
+| Rust builds: Ratatui, Tauri | `target/` in each demo | 3–4 GB |
+| node_modules: TanStack, Angular, Expo, Tauri, Next.js, Temporal UI | each demo folder | \~2 GB |
+| JetNews Gradle build + caches | demo folder, `~/.gradle` | 1.5–2.5 GB |
+| Python envs: Temporal agent, LangGraph + Python 3.11 | demo folder, `~/.cache/uv` | \~1 GB |
+| Everything else: raylib, Flutter, Go, Maven, NuGet, Jekyll, taxi.duckdb, Godot imports | mixed | 2–3 GB |
+| Ollama models used by models/local-rag and models/compare (pulled by setup's install-models, not by dev-demo; v77) | `/usr/share/ollama/.ollama/models` | \~5 GB |
+| Drupal RAG site on first launch: Composer project with Drush and the AI modules, plus the pgvector database volume (v80) | `drupal/drupal-rag`, Docker volume `ddev-devdemo-drupal-rag-pgvector` | \~300 MB (estimate) |
+| Drupal LDAP site on first launch: Composer project with Drush and drupal/ldap (miniOrange's ldap_auth too if you pick it), plus the lldap image and its data volume from setup's install-ldap (v83) | `drupal/drupal-ldap`, Docker volume `devldap-lldap-data` | \~250 MB (estimate) |
+| SQL Server 2025 and Oracle 26ai Free images and their data (pulled by setup's install-db-server, not by dev-demo; v82) | Docker's storage, volumes `devdb-mssql-data` and `devdb-oracle-data` | \~3 GB per image (estimate; Oracle's full image from install-oracle-full is about 9.5 GB), plus data |
+| MCP Python SDK 2.x and its dependencies for net/mcp-hello (fetched by uv while dev-demo prepares the demo, v84) | `~/.cache/uv` | \~40 MB (measured in a sandbox) |
+| Shared-service images and their data: Redis, Memcached, the search engines, Qdrant, Milvus, MongoDB, Atlas Local and (v91) the Selenium Grid, about 1.5 GB (pulled by setup's install-cache, install-search, install-vector, install-mongodb and the opt-in flags, not by dev-demo; v89) | Docker's storage, volumes `devsvc-<name>-data` | \~0.1–2 GB per image (estimate), plus data |
+| Python packages uv fetches for the v89 demos: FastMCP, FastAPI and uvicorn, pymilvus with Milvus Lite, redis-py, pymongo (v89) | `~/.cache/uv` | \~200 MB (estimate) |
+| graphql/apollo-supergraph's first launch: Strawberry through uv, and Apollo Server with @apollo/subgraph for the reviews subgraph (v90) | `~/.cache/uv and reviews/node_modules` | \~25 MB node_modules (measured in the sandbox) + \~10 MB uv (estimate) |
+| drupal/drupal-graphql, local site: Drupal 11 + Umami + graphql + GraphQL Compose on SQLite; plus kitchen's node_modules (v90) | `~/dev-demo/drupal/drupal-graphql/local` | \~250 MB + 25 MB (estimate until dev-test measures it) |
+| drupal/drupal-graphql, DDEV site: the same code, MariaDB in a Docker volume, DDEV's images shared with the other DDEV demos (v90) | `~/dev-demo/drupal/drupal-graphql/ddev, volume devdemo-drupal-graphql-mariadb` | \~250 MB + \~150 MB (estimate until dev-test measures it) |
+| testing/e2e-bakeoff's first runs: node_modules for Playwright Test, playwright-bdd, cucumber-js and Cypress; Behat's vendor; the Reqnroll project with Playwright for .NET; behave's Playwright for Python and Selenium through uv; Cypress's Electron build (v91) | `~/dev-demo/testing/e2e-bakeoff, ~/.cache/uv, ~/.nuget, ~/.cache/Cypress` | \~0.5 GB without Cypress, \~0.8 GB with it (estimate until dev-test measures it) |
+| drupal/drupal-behat's first serve: Drupal 11 + Umami + Drush + the Drupal Extension in DDEV, the database volume, and the add-on's selenium/standalone-chromium image; core-dev and web/core's node_modules only if you run core-fjs or nightwatch (v91) | `~/dev-demo/drupal/drupal-behat/site, Docker's storage` | \~300 MB + \~1.5 GB image; core-dev and Nightwatch add \~0.5 GB (estimate) |
+| vue/vue-links' first launch: Vue, Pinia, Vite, Vitest and Playwright's test runner (v91) | `~/dev-demo/vue/vue-links/node_modules` | \~135 MB (measured in the sandbox) |
+| lazarus/examples, a project's first build in the IDE: its units and binary in the copied example folder; the IDE's Qt5 builds in \~/.lazarus and \~/.lazarus-dark are setup's (install-lazarus, v94), counted in dev-test's disk report | `~/dev-demo/lazarus/examples/<project>` | a few MB per project (estimate) |
+| drupal/drupal-nuxt's first serve: Nuxt 4's node_modules (v91); its Drupal is drupal/umami-headless's since v96 (below) | `~/dev-demo/drupal/drupal-nuxt` | \~210 MB node_modules (measured in the sandbox) |
+| drupal/umami-headless's first `up` (v96): Drupal 11 + Umami + Drush on SQLite, the one site drupal-nuxt and drupal-astro share; a site drupal-nuxt made before v96 is moved here, not reinstalled | `~/dev-demo/drupal/umami-headless` | \~250 MB (estimate) |
+| drupal/drupal-astro's first serve and build (v96): Astro 7 and @astrojs/node, and the built site with its resized images | `~/dev-demo/drupal/drupal-astro/astro` | \~160 MB node_modules + \~1.5 MB dist (measured in the sandbox) |
+| gitlab/ci-local's pipelines: node:24 and Playwright's image for vue-links; drupal.org's PHP, database and browser images for the module's pipeline (v91) | Docker's storage, and .gitlab-ci-local/ in each project | \~3 GB for vue-links' images, several GB more for the Drupal pipeline (estimate) |
+| iac/cm-bakeoff's containers: devdemo-cm-base (debian:trixie-slim with curl and procps), then Python for Ansible, OpenVox's agent for Puppet and Cinc Client for Chef (v91) | Docker's storage | \~0.6 GB for the four images (estimate) |
+
+The three heaviest single items are the Langfuse stack (\~3 GB), the gcloud emulator image (\~2 GB) and SQL Server (\~1.6 GB). Skipping them saves roughly 6–7 GB.
+
+Two demos moved off port 8080 in v96, since DDEV's router holds 8080/8443 on ChromeOS from setup v96 on while any DDEV project runs: the Docker voting app (`base/voting-app`) votes on :8090 and shows results on :8091, through `docker-compose.devdemo.yml`, a copy of upstream's `docker-compose.images.yml` with those host ports that the launcher rewrites on every run (an override file would add ports, not replace them), and Spring PetClinic (`java/spring-petclinic`) runs on :8092 (`--server.port=8092`). The DDEV notes of other demos (laravel, symfony, drupal-graphql) now print the router's port in their URLs.
+
+The Ansible demo (v76, `~/dev-demo/ansible/docker-web`, with install-iac or install-ansible-core) is a generated project of a few KB. Its first deploy pulls `debian:trixie-slim` (about 120 MB) and installs Python and nginx inside the container; `run-docker-web.sh down` removes the container, and the image stays in Docker's storage for the next run.
+
+The two model demos (v77, `install-models`) download nothing: `models/local-rag` and `models/compare` are generated Python scripts under 50 KB, and local-rag's `index.json` stays in the kilobytes for the sample notes and reaches about 10-15 MB at the demo's cap for your own folders (300 files, 600 chunks; node_modules, build output and hidden folders are skipped). Their weight is the models setup already pulled, about 5 GB in Ollama's store, and RAM while one runs (up to \~4 GB for qwen3.5:4b). `run-compare.sh remote` runs the comparison on `OLLAMA_REMOTE`'s server, which uses that machine's disk and memory instead.
+
+The Drupal RAG demo (v80, `drupal/drupal-rag`) needs `install-drupal`, `install-models` and `install-ollama-containers`: the site runs inside DDEV's containers, so it reaches Ollama at `http://host.docker.internal:11434`, which only answers once Ollama listens beyond localhost. Its first `run-drupal-rag.sh` downloads the Composer project and the `pgvector/pgvector:pg17` image, installs Drupal with admin/admin, enables the AI, Ollama provider, AI Search, AI Agents and Postgres vector modules, and seeds six articles. Since v81 it pins AI core to the 1.5 line, AI Search to 1.3 (its own project since AI 1.5, alpha releases so far) and AI Agents to 1.x, which AI Assistants runs on in 1.5. A drupal-rag folder made by v80 keeps its old STEPS.md until you run dev-demo with demo-refresh; the launcher itself is rewritten on every run, so the pins apply either way. The remaining clicks (keys, the vector index, the chatbot block) are listed in `.ddev/devdemo/STEPS.md`, which the launcher prints. Embeddings come from qwen3-embedding:0.6b (1024 dimensions), already pulled by install-models.
+
+The Drupal LDAP demo (v83, `drupal/drupal-ldap`) needs `install-ldap` (lite, lldap in Docker) or `install-ldap-full` (which adds OpenLDAP's slapd) from setup, plus DDEV. `run-drupal-ldap.sh` starts DDEV and the directories (`ldap up`), adds PHP's ldap extension to DDEV's web image if it is missing, downloads Drupal 11 with the contrib LDAP suite (drupal/ldap 4.x), installs it with admin/admin, creates one LDAP server per directory (devldap_lite reaches lldap as `ldap://lldap:3890`, devldap_full reaches slapd as `ldap://host.docker.internal:389`) and sends logins through the one you pick: `run-drupal-ldap.sh lite` (the default) or `full`. Log in as alice, bob or carol with the password `ldap passwords` shows; Drupal creates the account on the first login, and admin/admin keeps working. `run-drupal-ldap.sh miniorange` swaps in miniOrange's `ldap_auth` module instead (one login module at a time); `lite` or `full` switches back. Mapping LDAP groups to Drupal roles is left for the admin UI, step by step in `.ddev/devdemo/STEPS.md`, which the launcher prints.
+
+The Firebird demo (v80, `db/firebird`, shown with `install-db` or `install-interbase`) downloads nothing: its databases are created in `/tmp` when you run it and are a few hundred KB. The `interbase` menu entry needs InterBase installed and running (see the [init checklist](init-checklist.md)).
+
+The database-servers demo (v82, `db/servers`, shown with `install-mssql` or `install-oracle`, both part of `install-db-server`) downloads nothing either: it uses the containers setup created. `run-servers.sh` loads the Firebird demo's airports schema into SQL Server as T-SQL (a devdemo database, a stored procedure, FOR JSON) and into Oracle as PL/SQL (a function returning a cursor, JSON_ARRAYAGG), and its `odbc` entry queries both through unixODBC. It runs one engine at a time and stops again whatever it started. With install-mssql, the Chinook demo's sqlserver entry also uses that server instead of a throwaway container on port 51433, and leaves the Chinook database in it. Since v83 the Oracle script ends by listing the database's optional components, which shows what the full image adds over Lite; a db/servers folder made by v82 gets the new script with demo-refresh. The odbc entry shows each engine starting rather than sitting silent for minutes.
+
+The MCP demo (`net/mcp-hello`, shown with `install-lan`, v84) is a small MCP server and client, single-file uv scripts on the MCP Python SDK 2.x. The server listens on every interface, since the SDK refuses requests addressed to anything but localhost while it listens on 127.0.0.1; its tools say which laptop answered, what it shares and which Ollama models it has, and can ask one of them. `run-mcp-hello.sh server` starts it (other laptops need `mcp` in its `LAN_SHARE` and the ChromeOS forward for port 8000), `client <laptop>` calls it from another laptop, `register <laptop>` adds it to Claude Code, and `local` runs both on one machine. There is no login, so run the server on your home network only.
+
+The COM and retro demos (`com/hello-com` with `install-com`, `retro/matrix` with `install-retro`, v85) are generated in place and build on demand, so their `~/dev-demo` footprint is under 1 MB each; the compilers (Open Watcom, mingw), Wine and DOSBox-X come from setup, and the Wine prefix lives in `~/.local/share/wine/com`. `run-hello-com.sh` builds a COM component with widl + mingw and drives it under Wine: an in-process DLL (`regsvr32` + `CoCreateInstance`), an out-of-process EXE (the DCOM activation path, with distinct client and server pids), the 32-bit build, the generated type library, and unregister. `run-matrix.sh` builds one program each for DOS 16, DOS/4GW 32, Win16, Win32 and Win64 and runs each on its engine — DOS in a DOSBox-X window, Windows under Wine — plus a `delphi1` item (v92: rewritten around 'delphi1 setup' and 'delphi1', with the Wine route's limits: no integrated debugger, Database Desktop or BDE tables) whose `STEPS-delphi1.md` covers both the Wine quick route and the DOSBox-X + Windows 3.11 faithful route (Windows media is your own, in `~/win31/install`).
+
+Since v92 `run-matrix.sh` also runs its builds inside the retro guests through `retro run --in`: `in-win31` (the Win16 build in Windows 3.1), `in-win95`, `in-winnt40` and `in-win2000` (the Win32 build, on the guest's exchange disk (normally D:, after NT/2000 completion and exchange enable)), each only when that guest is installed; `which` shows what `retro run` picks for each build and why, and `winnt` prints `STEPS-winnt.md` (the NT 4.0 and 2000 first boots). All three STEPS files are rewritten on every dev-demo run, so a matrix folder from an earlier version gets the v92 notes. `base/voting-app` now opens the results page first and the vote page last, and says to resize the window if a vote button will not click (the upstream page's label can sit over the buttons).
+
+The personal-agent demos (`agents/hermes` with `install-hermes`, `agents/openclaw` with `install-openclaw`, v86) download nothing; the agents themselves come from setup (roughly 0.6–1 GB in `~/.hermes`, 900 MB for OpenClaw's npm package). Both launchers have a `chat` item, an `offline` item that runs one turn against `mockllm.py`, a stand-in model on this machine, and prints what the agent sent it (its tools and the size of its prompt), and a `skill` item that copies `dev-bundle`, a skill written here, into `~/.hermes/skills` or `~/.openclaw/skills`. `run-openclaw.sh dashboard` runs the gateway on loopback and opens the Control UI until you press Enter, and `audit` runs OpenClaw's security audit. `chat` needs a model from init: a cloud key or a bigger machine's Ollama, since both agents need a 64K-token context.
+
+The Laravel demo (`laravel/links`, `install-laravel`, v87) downloads nothing while dev-demo runs. Its first launch creates the app with `laravel new` (about 110 Composer packages into `~/.cache/composer`, plus about 200 MB (75 MB and 130 MB, measured in a sandbox) of `vendor/` and `node_modules/` in the app), migrates and seeds its SQLite file, and builds the front end, which also fetches a font from fonts.bunny.net. `run-links.sh` has `dev` (`composer run dev`), `serve`, `test`, `tour`, `ddev` (the same app and SQLite file in DDEV; `run-links.sh down` stops it), `boost` (Laravel Boost for Claude Code) and `starter` (a second app from a React, Vue, Svelte or Livewire starter kit).
+
+The Symfony demo (`symfony/links`, `install-symfony`, v88) is the same links app on Symfony 8, and also downloads nothing while dev-demo runs. Its first launch creates the app with `symfony new --webapp` (about 130 Composer packages through `~/.cache/composer`, and about 100 MB in the app, 80 MB of it `vendor/`, measured in a sandbox), points it at a SQLite file, makes and runs the migration, and seeds five links; there is no front-end build, since the webapp's importmap serves Stimulus and Turbo as they are. `run-links.sh` has `serve` (`symfony serve`), `test` (PHPUnit: list, add through the form, validation, JSON), `tour`, `ddev` (the same app and SQLite file in DDEV; `run-links.sh down` stops it), `security` (`symfony check:security`) and `tls` (`symfony server:ca:install`, which changes your trust stores).
+
+The service demos (v89) use setup's shared services and start them through `devsvc`, which checks memory first. `services/search-bakeoff` (any search engine installed) indexes Apache Solr's example films (1,100 films with a small 10-dimension vector, CC BY 2.5) into each of Solr, OpenSearch, Elasticsearch, Meilisearch and Typesense it finds, asks each the same four questions (all words of 'harry potter', the five biggest genres, the typo 'godzila', the films nearest to Batman Begins) and prints them side by side. `run-search-bakeoff.sh` has `all` (one engine at a time, then the report), one item per engine, `report` and `drop`; it stops again an engine it started. `services/redis` is a stepped tour of Redis 8 (strings to streams, pub/sub, JSON, time series, Bloom, vector search; `nonstop`, `cli`, `insight`), and `services/mongodb` imports the films and walks through queries, updates, aggregation, a text index, `explain()` and an export, then drops its database.
+
+`agents/fastmcp` (install-agentic) is a FastMCP server over the same films with three tools and a resource: `call` lists and calls them over stdio, `http` mounts the server at `/mcp/` in a FastAPI app on :8765 next to REST routes, `inspector` opens it in the MCP Inspector, and `claude` / `remove` add it to Claude Code as `films` or take it out. `cloud/cloudflare` (install-cloudflare) is a Worker with a D1 notes table: `dev` runs it with `wrangler dev` on :8787 and a local database, no account; `deploy` asks first and needs `CLOUDFLARE_API_TOKEN` or `wrangler login`; `tunnel` (with install-cloudflared) puts the local Worker on a public trycloudflare.com address after a warning.
+
+v101 verifies the installed global Inspector CLI with its matching Node. The demo's
+`fastmcp dev inspector server.py` uses npx and may need online registry metadata. After
+`devclean --run` clears npm's cache, use that Inspector command online once before trying it
+offline. Dev-test reports metadata key presence as INFO; content, package dependencies and
+server Python dependencies are not verified by that INFO. Full offline UI operation is not promised.
+
+
+Two older demos gained items in v89. `web/drupal-umami` adds `redis` and `memcache` (Drupal's cache in the shared service, through a marked block in settings.php that `cache-off` removes), and `solr` and `opensearch` (the Search API modules enabled and the server form's values printed). `models/local-rag` takes `--store` (json, sqlite-vec, qdrant, redis, milvus-lite, atlas-local) and has a `store` item that loads the same chunks into another store without re-embedding; `RAG_STORE` picks the store for the other items. A folder made earlier gets the new launchers with `demo-refresh`.
+
+The GraphQL demos (install-graphql, v90) need no Apollo account. `graphql/apollo-supergraph` splits the same films across a Python subgraph (films, :4001) and a Node subgraph (reviews, :4002) behind the Apollo Router on :4000: `dev` runs `rover dev`, `compose` the plain router, `plan` prints a query plan across both, `break` shows a composition error, and `mcp` puts three operations on apollo-mcp-server (:8771) as `films-graphql` in Claude Code. `drupal/drupal-graphql` (also needs install-web) installs Umami twice, on PHP's built-in server with SQLite (:8889) and in DDEV (`devdemo-drupal-graphql`, MariaDB), with the graphql module and GraphQL Compose; `serve`, `query` and `compare` work on either, `federate` adds the kitchen subgraph through the router, `mcp` registers `umami-graphql` or `umami-graphql-ddev`, and `connectors` (only with APOLLO_KEY and APOLLO_GRAPH_REF) adds Apollo Connectors over JSON:API. Ports: local router 4000, kitchen 4002, MCP 8771; DDEV router 4010, kitchen 4012, MCP 8772. The local runtime and apollo-supergraph share 4000, 4002 and 8771, so run one at a time. `run-drupal-graphql.sh stop all` stops both sites and their pieces.
+
+The test demos (v91) come with `install-testing` and `install-cypress`. `testing/e2e-bakeoff` serves a small links app on :8795 and runs one Gherkin file, `features/links.feature`, through every BDD runner installed (cucumber-js, playwright-bdd, behave, Behat 4 and Reqnroll, each with its own step definitions), then the same two scenarios without Gherkin in Playwright Test, Selenium with pytest, Robot Framework and Cypress. `run-e2e-bakeoff.sh` has an item per runner, `all`, `report` (seconds and lines of code per runner), `engines` (Chromium, Firefox, WebKit, Chrome), `ui`, `codegen`, `trace`, `agents` (Playwright's test agents for Claude Code), `mcp` (Playwright MCP in Claude Code for that folder), `grid` (the Selenium test through the shared Grid, watched in noVNC) and `headed`. Behat there drives no browser (Mink's BrowserKit driver), so it is the only runner without JavaScript. `drupal/drupal-behat` (with `install-bdd`) installs Umami in DDEV with the Drupal Extension on Behat 3 and DDEV's Selenium add-on: `visitor`, `api` and `javascript` run the three feature files, `watch` opens noVNC on :7900 first, `steps` lists every step, and `core-fjs` and `nightwatch` run one of core's own browser tests in the same Chrome. `run-drupal-behat.sh stop` stops the project; `delete` removes it.
+
+The Vue and GitLab demos (v91) come with `install-vue` and `install-gitlab`. `vue/vue-links` is a Vue 3 front end (Vite, Pinia, Vitest, Playwright, Vue DevTools) on the e2e bake-off's links app, with the same labels and markup. Its `bakeoff` item therefore runs the bake-off's Gherkin feature unchanged against the Vue version, and Behat, which runs no JavaScript, is expected to fail there. Its other items are `dev`, `test`, `e2e` (against a mocked API), `build` and `reset`. `drupal/drupal-nuxt` serves Umami headless on PHP's built-in server and SQLite (:8891) through core's JSON:API, and a Nuxt 4 app (:3020) renders its recipes on the server: `serve`, `build`, `api`, `source` (the titles in the server-rendered HTML), `drupal`, `stop` and `reset`. Since v96 drupal-nuxt's Drupal is `drupal/umami-headless`, which it shares with drupal-astro (below): `serve` starts it through `run-umami-headless.sh up`, it keeps running after Nuxt stops, and `stop` and `reset` act on the shared site. `gitlab/ci-local` runs pipelines locally with gitlab-ci-local, one job at a time: vue-links' pipeline (`vue`, `vue-job`, `vue-list`, `preview`) and a small contrib-style module through drupal.org's own GitLab CI templates (`drupal-list`, `drupal-phpcs`, `drupal-phpunit`, `drupal-all`). `push` creates a private gitlab.com project and follows its pipeline once glab is logged in, and `runner` shows this machine's GitLab Runner.
+
+The headless Drupal pair (v96) shows one Drupal site rendered two ways. `drupal/umami-headless` (install-web) is Drupal 11's Umami on PHP's built-in server and SQLite on :8891, with core's JSON:API on; its launcher has `up` (installs Umami the first time, admin / admin, and starts Drupal detached, so it outlives the launcher that asked for it), `stop` and `reset`, and both front ends call it. A Drupal site drupal-nuxt made before v96 is moved there on the first `up`, content and all. `drupal/drupal-astro` (install-web; Astro itself is per project, so no flag and no global CLI) builds the same recipes into a static Astro 7 site: a content collection whose loader reads `node/recipe` from JSON:API at build time (following `links.next`, only the fields it shows) and checks them with `astro/zod`, one static page per recipe, and pictures through `<Image>` with Drupal's host in `image.domains`, so the build downloads and resizes them into `dist/` and the built site has no links back to :8891. One part of every page is live: a **server island** (`server:defer`, with the `@astrojs/node` adapter) that shows the most recently changed recipe, read from Drupal when the page loads; its fallback text stays when Drupal or the server isn't there. Items: `serve` (Drupal and Astro's dev server on :4321), `build` (`astro build`, then the built site's Node server on :4322), `api`, `source` (the titles in `dist/client`'s files, then Drupal stopped: the pages are still served and the island's request fails, so its fallback stays), `compare` (with drupal-nuxt: Nuxt on :3020 and Astro on :4321 side by side; edit a recipe title in Drupal and reload: Nuxt and Astro's island show it at once, Astro's own list after `build`), `drupal`, `deploy` (with wrangler from install-cloudflare: only `dist/client` goes up, as static assets on Cloudflare, after asking; Drupal stays on the Chromebook, so the deployed pages show the island's fallback), `stop` and `reset`. Drupal's address is `DRUPAL_URL` (default `http://127.0.0.1:8891`).
+
+The configuration management bake-off (v91) comes with `install-puppet` or `install-chef` (`install-config-mgmt` gives both). `iac/cm-bakeoff` builds the same small nginx server three times, each in its own Debian 13 container: Ansible pushes from the Chromebook (:8813), Puppet runs `puppet apply` in its container (:8811) and Chef runs `cinc-client -z` in its (:8812). Each tool takes part when it is set up here, so Ansible joins with `install-iac` or `install-ansible-core`. Items: one per tool, `all`, `idempotency` (a second run must change nothing), `report` (seconds for the first and second runs, lines of code per tool), `audit` (one InSpec profile run by cinc-auditor against all three), `noop` (a new headline tried as a dry run), `lint` and `down`. `CM_MESSAGE='Hello DC'` before the launcher changes the headline for real.
+
+The media demo (v78, `media/sintel`, with install-media) takes about 20 MB: a 60-second clip of Sintel (2:30-3:30) that ffmpeg cuts from the Blender Foundation's upload on archive.org, reading only the byte ranges it needs from the 283 MB film. v77 fetched the trailer from download.blender.org, which now answers scripted downloads with a Cloudflare challenge (HTTP 403), so it failed on every machine. If archive.org is unreachable too, the demo generates a 30-second test clip (about 4 MB) instead and is still ready; the next dev-demo run tries the download again. `SINTEL_START` and `SINTEL_SECONDS` pick another stretch, and `.dev-demo-source` in the folder says which clip it holds.
+
+The Lazarus examples (`lazarus/examples`, install-lazarus) are Lazarus's own example folder, copied so the projects can build in place. `run-examples.sh` opens a project in the IDE (light or dark profile). TDaemon (v96) is a systemd daemon rather than a program to run with F9, so picking it also prints how to run it: build it (Run → Clean up and Build once if it was built before setup v96 put `-dUseCThreads` in `~/.fpc.cfg`; before that its `-r` stopped with runtime error 232), then from a terminal in its build folder (`x86_64-linux/Debug` for the Debug mode) `sudo ./TestDaemon -i`, which writes `/lib/systemd/system/TestDaemon.service` pointing at the binary in that build folder (so rebuild before starting it), then `sudo systemctl daemon-reload` and `sudo systemctl start TestDaemon`. It logs to a daily file next to the binary (`YYYYMMDD.log`; "Daemon received start signal" once it runs). To remove it: `sudo systemctl stop TestDaemon`, then `sudo ./TestDaemon -u`. `-i` and `-u` need `sudo`.
+
+Since v96 the launcher has two items: `ide` (the project in the Lazarus IDE, as before) and `editor`: pick a project and the light or dark profile, and it runs `lazmode vscode` on it (a Debug-gdb build mode and `.vscode/` files, see the init checklist's Lazarus section), then opens the project folder in VS Code, Cursor or Devin, whichever are installed (Devin through its X11 wrapper). F5 builds and debugs: VS Code with FpDebug, Cursor and Devin with gdb. For TDaemon, `-r` is already the argument in `launch.json`, and the note above applies. `run-examples.sh editor TDaemon/TestDaemon.lpi dark code` skips the menus; `run-examples.sh <project> [dark]` still opens the IDE. The generated files and the first builds add well under 1 MB to the copied project, plus its build output.
+
+## What it means per Chromebook
+
+A Chromebook with 128 GB of storage has room for the full install-all environment plus every demo. On a 64 GB drive the same combination is tight. There, run `install-all` for the demo download, but launch only the heavy demos you need.
+
+The Linux container's disk size is a ChromeOS setting, so check it before a full run: Settings > About ChromeOS > Linux development environment > Disk size.
+
+## Reclaiming space
+
+`demo-clean` removes only the demo folders for the flags you pass. It leaves Docker images, `~/.gradle`, `~/.m2` and the package caches in place, so clear those separately. Before v81 it removed only the first demo in the dotnet, web, models, agentic and lakehouse groups, leaving vb-spectre, drupal-umami, compare, local-deep-researcher, langfuse and duckdb-tour behind; if you ran it with an earlier version, run the v81 demo-clean again to clear them.
+
+| Command | What it does |
+|---|---|
+| `du -sh ~/dev-demo` | Size of the demo folders themselves |
+| `docker system df` | Space used by Docker images, containers and volumes |
+| `docker image prune -a` | Removes images no container is using |
+| `./dev-demo-chromebook.sh <flags> demo-clean` | Removes those demos' folders and launchers (asks once). Since v81 that is every demo a flag installs, not only the first of each group |
+| `ddev delete -Oy devdemo-drupal-rag`, then `docker volume rm ddev-devdemo-drupal-rag-pgvector` | Removes the Drupal RAG site's database and its vector store (ddev delete leaves the pgvector volume behind) |
+| `ddev delete -Oy devdemo-drupal-ldap` | Removes the Drupal LDAP site's database. The LDAP directories stay; they belong to setup (the [init checklist](init-checklist.md)'s LDAP section says how to start them over) |
+| `cargo clean` in `rust/ratatui` or `tauri/tauri-app/src-tauri` | Drops a Rust `target/` folder (several GB for Tauri) |
+| `ollama list`, then `ollama rm <model>` | Removes a local model you no longer use (1-7 GB each). A later install-models run pulls the curated three again |
+| `docker rm -f devdb-mssql`, then `docker volume rm devdb-mssql-data` (the same for oracle) | Removes a database server and all its data, the Chinook and devdemo databases included. Rerun setup with install-db-server for an empty one; the image stays until docker image prune -a |
+| `devsvc down all` | Stops every shared service a demo started (the demos leave the services they start running). Redis and Memcached start again with Linux unless DEVSVC_AUTOSTART says otherwise |
+| `run-search-bakeoff.sh drop` | Removes the bake-off's films index from every engine here |
+| `docker rm -f devsvc-<name>`, then `docker volume rm devsvc-<name>-data` | Removes a shared service and its data (MongoDB and Atlas Local also have a -config volume). Rerun setup with its flag for an empty one |
+| `wrangler delete devdemo-notes`, then `wrangler d1 delete devdemo-notes` | Removes the deployed Worker and its D1 database from your Cloudflare account (only after the cloudflare demo's deploy item) |
+| `wrangler delete devdemo-umami-astro` | Removes drupal-astro's deployed static site from your Cloudflare account (only after its deploy item, v96) |
+| `run-umami-headless.sh reset` | Deletes the shared headless Drupal site (drupal-nuxt's and drupal-astro's); asks first. The next `up` reinstalls it |
+| `run-drupal-graphql.sh reset local` (or `reset ddev`) | Deletes that Drupal GraphQL site (for DDEV, ddev delete -Oy devdemo-drupal-graphql with its database), its kitchen data and its Claude Code entry; asks first. The next serve reinstalls it |
+
+Stop running pieces before cleaning: `run-drupal-cms.sh down`, `run-drupal-rag.sh down`, `run-podinfo.sh down`, `run-terraform-nginx.sh down` and `run-docker-web.sh down` (the Ansible demo's containers).
+
+The LDAP demo stops with `run-drupal-ldap.sh down`; the directories themselves keep running until `ldap down` (slapd, a system service, until `sudo systemctl stop slapd`).
+
+v100 (Nov 5 findings): win95 boots image disks only; the separate IMGMAKE session still mounts X:.
+New win95 setup.conf/boot.conf use `output=surface` to fix maximized redraw. Keep guests off when
+editing output/scaler settings; do not change them from the Video menu during Setup. Untouched v99
+`output=opengl` lines upgrade to surface once per config (trailing spaces allowed).
+The same atomic update writes `# v100: defaults reviewed`; new v100 configs start marked.
+Keep this marker when editing: later old values or deleted output/hostkey lines stay as you chose.
+Unmarked configs from earlier drafts get one review. Edited values/comments and duplicate
+assignments keep their settings and receive the marker too. All four DOSBox-X configs default to `[dosbox] hostkey=ctrlshift`
+(Ctrl+Shift+F for full screen); existing choices stay, and misplaced hostkey lines require manual review.
+Missing defaults are added only while the guest is stopped; win31 stays opengl and DOS stays ttf.
+Review owner-added folder mounts in win95 `[autoexec]` before booting; they are never removed automatically.
+
+v100 QEMU defaults and installation completion (Nov 5–6 findings): new win2000 configs use
+`ACCEL=tcg`, `DISPLAY_OPTS="gtk,zoom-to-fit=off"` and `SOUND=none`. Untouched v99 ACCEL, DISPLAY_OPTS and SOUND
+lines upgrade once per config, matching the full original line including its comment (trailing spaces allowed).
+The same atomic update writes `# v100: defaults reviewed`; new configs start marked. Keep the marker:
+subsequent owner choices, even old spellings or deleted keys, survive setup and launch. Unmarked
+configs from earlier drafts get one review. Edited values/comments/spacing and duplicate assignments
+keep their settings; ambiguous configs receive only the marker. Running guests defer without marking.
+NT 4.0 keeps auto acceleration, scaled GTK, PS/2 and sb16; if it is slow, try TCG with the guest
+off (NT performance remains an owner check). KVM availability does not imply a guest selected KVM.
+`<guest> accel` reports the selection/reason; `<guest> preferences` reports preserved preferences.
+Raise the Windows screen area in Display Properties if the unscaled picture is too small.
+v101 keeps Windows 2000 sound off by default. For an owner-approved audio trial, stop the guest,
+set SOUND=sb16 and use its SB16/AWE32-compatible WDM driver (I/O 220, IRQ 5, DMA 1, 16-bit DMA 5).
+AUDIO_BACKEND=auto selects available native PipeWire, then PulseAudio, then an explicit silent
+backend; pipewire/pa/none can be requested explicitly. An unavailable explicit backend stops before
+launch. Native PipeWire removed the observed volume errors, but TCG playback still stuttered;
+no clean audio or KVM fix is claimed. A suitable built-in AC97 driver has not been established.
+Sound was not the cause of the boot stall.
+
+Every NT/2000 `setup` (including resumed setup and --from-cd/--raw) withholds the exchange disk and
+clears attachment acknowledgement. Finish Windows installation, reach the desktop, shut down, then
+run `<guest> exchange enable`; boot normally. Existing installations also need this one-time enable.
+Normal boots stay detached until enabled for that system disk; replacement disks require enable
+again. `exchange disable` clears the acknowledgement without changing disk contents. `exchange info`
+and status show enabled/deferred/stale. `run` refuses while withheld, before copying or launching;
+`put`/`fonts` can prepare it but warn that it is withheld. Restoring a pre-install snapshot: disable
+exchange before resuming Setup. Never use disk existence as evidence Windows finished installing.
+
+CD drive letters during Setup are provisional. After enabling exchange, assign it D: in Disk
+Management if D: is free; existing installations may have different letters. Do not rename a Windows
+system already installed on F: automatically. On an old-version install before Windows is installed,
+the historical F3/boot-CD-again workaround can make the system partition enumerate first; v100
+withholds exchange instead. Format/recreate exchange only from Linux: put/get require its FAT layout.
+Start with `exchange info` and `get` to back up accessible files before considering `exchange recreate`.
+A deleted partition is not recovered by recreate; it makes an empty disk. Never format exchange in
+Windows, and never write the guest's qcow2/NTFS C: with host mtools.
+
+v100 font diagnostics (Nov 5 finding): explicit `delphi1 setup` / `delphi N setup` checks Arial,
+Courier New, Tahoma and bold Tahoma files and retries acquisition once if the command fails or files
+are incomplete. Each attempt has a five-minute timeout plus a ten-second kill grace; timeout
+statuses are saved and retry still happens only once. The final FONT RESULT is prominent and
+nonfatal to the IDE. Both attempt statuses and output stay in `assets/logs/retro-fonts-<prefix>-<timestamp>.log`; setup records the bundle assets
+location, so logs do not depend on the launch directory. `<prefix command> status` only reads font
+files. `win31 fonts` (or another guest's fonts command) collects existing fonts from all Delphi/COM
+prefixes or the existing winetricks download cache; it never downloads or repairs. If none are found:
+`WINEPREFIX="$HOME/.local/share/wine/delphi1" winetricks corefonts tahoma`, then `win31 fonts`.
+Use the relevant Delphi N prefix to repair that prefix. Plain winetricks targets a different default
+prefix. An incomplete optional font download is a dev-test WARN; missing optional prefixes are skips.
+
+v100 loose app media: install-retro supplies genisoimage. An app CD can be built from your own CD's
+loose files; it does not make a bootable Windows installer. For example, first ensure the destination
+ISO does not exist (or choose a new name), keep it outside the source tree, then:
+
+    test ! -e "$HOME/win95/install/apps/delphi3.iso" && genisoimage -o "$HOME/win95/install/apps/delphi3.iso" -J -r -V DELPHI3 "$HOME/delphi/install/3"
+    bsdtar -tf "$HOME/win95/install/apps/delphi3.iso"
+    win95 cd delphi3
+
+Check the filenames in Windows before installing. Change the destination workspace for another
+guest. `<guest> cd` still takes ISO files, not folders. Original files stay unchanged; the ISO uses
+roughly another source-folder-sized allocation inside the guest workspace, already counted by its
+disk report. The generated retro demo itself remains under 1 MB; guest/media/log storage is separate.
+
+v100 colors (owner choice 12B): `delphi1 colors` and `delphi N colors` list `default` plus your
+own schemes in `~/.config/dev-retro/colors/NAME.reg`. No Breeze Dark data is bundled or downloaded:
+no license grant was observed. You can place your own local file there and select its name. Only
+REG_SZ RGB triplets (0–255) for the known HKCU Control Panel Colors values are accepted; other
+registry sections/types/deletions, duplicate values and invalid names are rejected before writing.
+
+    delphi1 colors list
+    delphi1 colors save before-change
+    delphi1 colors use default
+    delphi 3 colors use NAME
+
+Names use letters/digits, dot, dash or underscore and must start with a letter/digit; pass a name,
+not a path or filename extension. Save refuses an existing name and `default`. Schemes can be shared
+between prefixes, but switching/selection is per prefix. Close **all** apps in that prefix, including
+Wine apps started outside the helper; a wineserver wait check and per-prefix lock refuse busy or
+uncertain state. The helper never kills apps to obtain access. List needs no installed prefix/Wine.
+
+Explicit use sets ThemeManager ThemeActive to REG_SZ 0 (winecfg Theme: No Theme), removes inactive
+style settings, applies only validated colors and verifies registry readback. Default removes only
+known color overrides to let Wine choose colors; custom unrelated values remain. Targeted Colors
+and ThemeManager backups are in `~/.config/dev-retro/colors/backups`; failure restores them and leaves
+the selection label unchanged, or reports rollback incomplete with the retained backup path. Restart
+apps after switching; Delphi's own editor colors are separate. New prefixes get No Theme; existing
+ThemeActive/colors are preserved (only an absent ThemeActive is initialized). Setup no longer resets
+the desktop to black or reapplies a saved scheme over manual changes. The selection is a label:
+dev-test warns on manual drift or an active theme and never repairs it. Existing COM prefixes are
+not changed. The disposable real-Wine integration check uses only a test-owned scratch prefix.
+
+v100 win95 networking (Nov 5 finding): `win95 net` / `win95 net status` shows next-boot config,
+not connectivity. With Windows shut down, `win95 net on` adds the managed NE2000 block in boot.conf:
+ne2000=true, backend=slirp, nicbase=300, nicirq=3. It adds serial2=disabled only if absent to avoid
+COM2's IRQ3 conflict. Explicit serial2 values are kept; an enabled/custom COM2 must be resolved
+manually before on. `win95 net off` removes only unchanged helper-owned additions. Unmanaged or
+hand-edited network blocks are reported for manual review; no custom settings are overwritten.
+Setup.conf is untouched. Networking starts off; no drivers are installed automatically. The backend
+is checked from binary linkage/strings without starting DOSBox-X; an unsupported build refuses on.
+
+Windows 95 steps after on: add NE2000 Compatible manually (not Plug and Play), I/O 0300 / IRQ3;
+ensure no COM2 conflict; add TCP/IP, obtain an address by DHCP, reboot, inspect `winipcfg`. The Linux
+host is normally 10.0.2.2. Try a known host service and another laptop by its explicit Tailscale IPv4
+address first. Plain HTTP may work; period browser HTTPS/TLS support is limited. MagicDNS, inbound
+access, ping responses and DCOM are not promised. No host forwarding or win31 networking is added;
+the broad guest network test matrix remains deferred to v101. Shut Windows down before off/on.
+
+v100 owner observations (Nov 5–6 2026), not a claim that every Delphi version/component works:
+Delphi 3 Client/Server installed under Wine from loose CD files and its IDE ran. Once installed,
+plain `delphi 3 setup` reapplies settings; to revisit the CD menu for Local InterBase or InstallShield
+Express use `delphi 3 setup "$HOME/delphi/install/3/INSTALL.EXE"`. Setup now preserves manual colors.
+The four Internet Solutions Pack controls HTTPCT.OCX, POPCT.OCX, SMTPCT.OCX and WINSCK.OCX reported
+registration errors in that install. Clicking OK let Delphi install/run; those optional controls
+may still be unavailable. This is not advice to ignore unrelated installer errors or a claim that
+all add-ons work. Delphi 4–7 remain unverified on the owner's media.
+
+Delphi 1 and Delphi 3 IDEs predate normal wheel support and ignored the wheel under Wine, while
+Notepad in the same prefix scrolled. Use Ctrl+Up/Down and Page Up/Down in the IDE. Delphi 1 files
+belong in a folder such as `~/win31/install/apps/Delphi1` (a name containing delphi helps discovery);
+Delphi 3–7 use `~/delphi/install/N`, as loose CD files or an ISO. The Delphi 3–7 IDE launchers appear
+after their `delphi N setup`, not merely install-retro. The bare DOSBox-X launcher is Debian's own
+entry; use win31/win95/retro commands for bundle guest settings.
+
+v100 guest hand procedures (Nov 5–6 owner findings): DOSBox-X full screen can lose keyboard
+focus after switching windows on ChromeOS. Click the picture; try the current mapper's Ctrl+F10
+mouse-release shortcut and Alt+Enter if mapped. New/absent host-key settings use Ctrl+Shift, so
+Ctrl+Shift+F toggles full screen; explicit owner mappings remain. Verify these on each guest during
+acceptance: the host key alone is not asserted to release the mouse. No maximize=true default is
+added. F11/F12 mappings are under ChromeOS Settings > Device > Keyboard and inputs > Customize
+keyboard keys; QEMU instead uses Ctrl+Alt+G for a captured PS/2 mouse and `<guest> keys ctrl-alt-del`
+for NT/2000 login.
+
+Change output/scaler in the config with the guest off, not through the Video menu while running,
+especially during Setup. One owner Windows 95 Setup run became unbootable after a live menu change.
+If the picture is lost in Windows 95, the owner's blind Start-menu shutdown sequence was Ctrl+Esc,
+U, Enter; it is not a universal DOS/win31/NT shutdown shortcut. Do not force a renderer change to
+recover it. Windows 3.1 floppy setup queues all .IMG/.IMA files on A: in filename order; DOS > Swap
+floppy advances the queue. At the end choose Return to MS-DOS, then restart with win31.
+
+For NT/2000, reach the installed desktop, shut down, exchange enable, then put/get with the guest
+off. A reported D: is a convention; check the exchange volume's actual letter in older installs.
+In Disk Management assign an unused letter to an existing FAT volume with no letter, without
+formatting. If it says unallocated, stop: recreating it on Linux makes an empty disk and does not
+recover a deleted partition. Never format exchange in Windows; mtools expects the Linux-created
+FAT layout. Avoid writing C: directly from Linux: qcow2/NTFS are not exchange FAT disks and writes
+must never race a guest. Windows 2000 Setup's FAT choice above 2 GB means FAT32; after a backup,
+an optional in-guest `convert C: /fs:ntfs` changes it later (use the actual Windows system letter,
+which may differ on old installs). Conversion is never part of dev-test or automatic acceptance.
+Windows 2000 has no built-in Explorer ZIP support: unzip your archive on Linux into the guest
+workspace, then put the resulting folder. No extra ZIP software/media is downloaded by the bundle.
+
+
+### v101 retro profiles and NT CPU
+
+New NT 4.0 configs use CPU=pentium after the observed Pentium III hal.dll STOP. Existing simple
+configs upgrade only the untouched v100 CPU template (or an absent CPU) once, recording
+`# v101: NT CPU reviewed`. Edited/duplicate/complex settings stay; running guests defer and
+symlink configs stay untouched. Keep both v100 and v101 review markers: later restored/deleted
+settings are owner choices. Windows 2000's CPU and TCG/no-sound defaults stay unchanged.
+
+For NT's drifting PS/2 pointer, use View > Grab On Hover/click capture, Ctrl+Alt+G to release and a
+slower speed in Control Panel > Mouse > Motion. Install NT's Cirrus driver for better drawing;
+skip the display Test button. No USB tablet or VMware mouse driver is added. NT KVM/TCG speed
+and Windows 2000 KVM/audio variants remain owner-run checks, one change at a time with backups.
+
+For a windowed win95 profile, keep `[sdl] output=surface` for maximized redraw. For the owner's
+full-screen stretching profile, edit the stopped guest's config to `[sdl] output=opengl` with
+`fullresolution=desktop` and `[render] aspect=false`, then use Ctrl+Shift+F with the default mapper.
+Stretching can distort aspect ratio and OpenGL may flicker in a maximized window. win31 retains
+OpenGL; verify its full-screen profile separately. DOS text stays ttf. Valid recognized renderer
+choices are informational; missing/duplicate/unrecognized values and unsafe mounts still WARN.
+Never edit the renderer from the live Video menu during Setup.
+
+The owner's Delphi 3 OLEnterprise Object Agent hung/crashed win95 with the dynamic core.
+Owner checked Nov 9 2026: `win95 --core normal` boots with the agent starting. With the guest
+shut down, set `core=normal` in the `[cpu]` section of `~/win95/boot.conf`; the owner confirmed
+this persists across plain `win95` boots. Setup already uses normal.
+
+The confirmed startup entry is in `HKLM\Software\Microsoft\Windows\CurrentVersion\RunServices`:
+value `Object Factory` = `C:\Program Files\Borland\OLEnterprise\bin\objfact.exe`.
+It runs during boot, before logon. The owner keeps it enabled for a possible later OLEnterprise
+transport. If disabling it is later desired, use Registry Editor to export the `RunServices`
+key first, then delete only the `Object Factory` value. Keep the key, other values and the
+OLEnterprise installation. This normal-core finding applies to that installation; other RPC
+software has not been verified.
+
+
+### v101 local guest link
+
+`winnt40 lan [status|on|off]` and `win2000 lan [status|on|off]` manage a local-only
+second PCnet pair, default off, through LAN keys in each existing guest config.
+Status creates nothing and never evaluates shell config or probes a peer. Stop both
+guests before editing/adoption. Follow [guest-lan.md](guest-lan.md): record the old
+MAC/model/PCI identity and static IP/WINS, keep backups, and remove only the known
+manual network stanza yourself. The managed NIC stays after USB/audio/EXTRA_ARGS.
+Ambiguous custom device layouts need recorded explicit PCI pins or are refused.
+The owner must confirm no new hardware and unchanged IP/WINS without re-entry,
+bidirectional ping/domain behavior and first-NIC internet. Remote mode is deferred.
+
+
+### v101 advanced-demo foundation
+
+`./dev-demo-chromebook.sh install-retro` also generates
+`~/dev-demo/retro/delphi/advanced-demo` and
+`~/dev-demo/retro/delphi/run-advanced-demo.sh`, independently of Watcom and the
+existing matrix demo. The three actions are steps, read-only status and results
+guidance. Status uses only the v101 local LAN status operations; an older/missing
+helper is reported without invoking it. The minimal launcher reads no demo
+credentials and starts no guest, listener, installer or service.
+
+README/STEPS/VERSIONS and the launcher refresh on every generation. Existing
+work/, results-template.tsv and owner results remain intact on ordinary reruns
+and demo-refresh. Explicit demo-clean lists the directory, launcher and flat index
+entry before confirmation; owner work inside the directory is included. Keep
+completed results separately under assets/logs/guest-network/ so cleanup leaves
+them available. The complete demo total measures the scaffold once; retained
+LAN/network evidence has its own disk row. There is no v101 application ISO.
+
+Follow [guest-network-tests.md](guest-network-tests.md) for the owner-controlled
+marker listener and browser/tools matrix. All 27 initial rows are NOT RUN.
+HTTPGET/Delphi/DCOM/databases and F0–F6 application gates remain deferred. Licensed
+media and NT SP6a are owner prerequisites, not downloads or automatic setup here.
