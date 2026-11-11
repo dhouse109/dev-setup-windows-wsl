@@ -458,6 +458,12 @@ appears in the script. "Kind" is one of:
 
 An item with two kinds (for example "edit, text") is counted under the first.
 
+*Added 2026-11-11, while writing the v1 plan:* four places this inventory missed, numbered S59, T45,
+T46 and I24, are listed in [v1-plan.md](v1-plan.md), section 2 ("Four additions to Part B"). They are
+install-models' own `df` reading (setup 7991) and three checks that look for a launcher in
+`~/.local/share/applications` (test 2242 and 2321, init 1735). With them the worklist is 161 items.
+The tables and counts above are left as reviewed.
+
 The host guard, the flag-expansion block and the screen-output block are each one piece of text
 repeated across scripts: 4 guards, 4 expansions and 2 recorders above are 3 pieces of work.
 
