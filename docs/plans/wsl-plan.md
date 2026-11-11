@@ -157,8 +157,8 @@ to the bash scripts inside WSL:
 > proposal. The 2026-11-11 decisions supersede it for Docker (Q4: docker-ce inside WSL), editors (Q6:
 > WSLg apps in v1), Ollama (Q5: inside WSL in v1), Android (Q10) and InterBase (Q16: in WSL); the table
 > is left as imported. install-godot, install-antigravity and install-media also stay WSL installs in v1,
-> not "Windows host" as their rows say (straight fork, Q13). Flags added after v80 are listed under "Not
-> yet reviewed".
+> not "Windows host" as their rows say (straight fork, Q13). Flags added after v80 are listed under
+> "v77–v101: reviewed 2026-11-11, pending owner review".
 
 Most flags port to WSL almost unchanged; the work concentrates in GPU, GUI apps, Docker and Android. This
 map is a first pass from the v77 flag list, updated for v80 (install-interbase, install-ollama-containers,
@@ -223,7 +223,24 @@ Windows PATH appended, Docker Desktop WSL integration active.
 **Host guard** *(handoff §3)*: the Chromebook scripts exit on anything that isn't ChromeOS + Debian; this
 fork's guard checks for WSL (`$WSL_DISTRO_NAME` or `/proc/sys/fs/binfmt_misc/WSLInterop`) + Debian.
 
-## Not yet reviewed: v77–v101 *(handoff §4)*
+## v77–v101: reviewed 2026-11-11, pending owner review *(handoff §4)*
+
+> **Reviewed 2026-11-11** in [v1-wsl-review.md](v1-wsl-review.md) (step 3 of the suggested sequence),
+> against the v101 code and not only the changelog. **Pending owner review: nothing in it is decided.**
+>
+> - **Part A:** 78 rows, one per flag, stack or behaviour v77–v101 added or changed. 39 are as-is, 7
+>   as-is with a first-run check, 18 need a WSL edit, 2 are ChromeOS-only and get a replacement, 11 sit
+>   inside flags already on the refused list, and 1 is already adopted here. It also gives a verdict on
+>   each item under "Items most likely to behave differently under WSL" below.
+> - **Part B:** 157 inventory items of ChromeOS-specific code across all of v101 (setup 58, test 44,
+>   init 23, demo 32), by section and line range: the v1 build's worklist.
+> - **Part C:** no flag has to join the "not yet supported on WSL" list (a watch list of five); one
+>   flag documented as needing AVX and five to verify on d4; 16 new open questions (Q19–Q34), each
+>   with a recommendation; 9 items in this doc that the review shows to be wrong or stale; and the
+>   first-run checks for d3.
+>
+> The questions are answered in chat and recorded here under Decisions before the v1 plan is written.
+> The section below is left as it was before the review.
 
 The review above covered v76. v77–v101 have not been checked against WSL. The Chromebook `CHANGELOG.md`
 (in `reference/dev-setup-chromebook/`) is authoritative.
@@ -384,8 +401,8 @@ Carried over from windows-plan.md's open questions and not covered above *(wordi
 
 Raised in the review and decided with the rest *(2026-11-11)*:
 
-- [x] **17. DDEV ports.** Use 80/443 under WSL, or keep 8080/8443 as on the Chromebooks (see "Not yet
-  reviewed")? *Decided 2026-11-11: Decisions, "Q17 DDEV ports".*
+- [x] **17. DDEV ports.** Use 80/443 under WSL, or keep 8080/8443 as on the Chromebooks (see
+  "v77–v101: reviewed 2026-11-11, pending owner review")? *Decided 2026-11-11: Decisions, "Q17 DDEV ports".*
 - [x] **18. `.wslconfig`.** Memory, swap and disk settings for the WSL VM (see the compatibility review's
   Resources row and the Disk item)? *Decided 2026-11-11: Decisions, "Q18 `.wslconfig`".*
 
@@ -402,7 +419,8 @@ details follow from questions 2–6).
    Draft PR, reviewed in chat, merged by Damien. *Done 2026-11-11 (PR #1 merged).*
 2. **Settle the open questions** in chat (at least 1–7 and 13), recorded in the plan doc. *Done
    2026-11-11 (PR #1 review); Q8 stays open.*
-3. **WSL review of v77–v101** (Claude Code, cloud, read-only): extend the compatibility table.
+3. **WSL review of v77–v101** (Claude Code, cloud, read-only): extend the compatibility table. *Done
+   2026-11-11, pending owner review: [v1-wsl-review.md](v1-wsl-review.md).*
 4. **v1 plan** in `docs/plans/v1-plan.md` (or whatever numbering is chosen) on `plan/v1`.
 5. **Preliminary build** in the cloud on `release/v1`: fork the four scripts, rename, guard, preflight,
    Debian/WSL edits, host script. Lint-clean, "built, not yet confirmed run".
@@ -413,6 +431,7 @@ details follow from questions 2–6).
 
 | Date | Topic | Outcome |
 | --- | --- | --- |
+| 2026-11-11 | WSL review of v77–v101 (step 3 of the sequence) | Written as [v1-wsl-review.md](v1-wsl-review.md) on `plan/v1`, from the v101 code: 78 Part A rows, 157 inventory items (setup 58, test 44, init 23, demo 32). No flag has to join the refused list. Raised for the owner: 16 new open questions (Q19–Q34), among them how links open in the Windows browser now that `wslu` is discontinued, where launchers go since WSLg does not list `~/.local/share/applications`, VS Code's WSL prompt, disk guards reading the VHDX's virtual size, and a second look at sparse VHD; and 9 items in this doc found wrong or stale. Nothing decided; pending owner review, then the v1 plan |
 | 2026-11-11 | PR #1 follow-up: three decisions | Refused flags in groups (Q13): any group, including `install-all`, skips a refused member with a notice, and naming a refused flag directly stops before anything installs. Docker Desktop (Q4): the host script checks its WSL integration for this distro and reports it, changing nothing; setup's preflight is the enforcement. Networking: v1 keeps WSL's default NAT, Windows browsers reach WSL services through localhost forwarding (DDEV at `localhost:8080` / `8443`), and mirrored networking comes with Q8. Brought in line: the host-script scope, the reason for the 22H2 minimum (needed when mirrored networking comes with Q8), the porting map note (install-godot, install-antigravity and install-media stay WSL installs in v1), and step 1 of the sequence marked done |
 | 2026-11-11 | PR #1 review: open questions decided | Q1–Q7 and Q9–Q16 decided, plus two new ones (Q17 DDEV ports, Q18 `.wslconfig`): v1 numbering; `-wsl` script names with `dev-host-wsl.ps1` sharing the version; docker-ce in WSL; Ollama in WSL for v1; WSLg editors in v1; NOPASSWD sudo drop-in; `appendWindowsPath=false`; install-android-native, install-lan, install-lan-share, install-retro and install-com on v1's "not yet supported on WSL" list; first runs on d3, d4 before done; one bundle, no tiers; InterBase in WSL; DDEV 8080/8443; `.wslconfig` at ~75% RAM with swap and sparse VHD. Also: Windows 11 22H2 minimum, inherited comments kept, `reference/` without `CLAUDE.md`, MIT license; the diffable-fork, portability-tag and `dev-common.sh` rows confirmed. Q8 (Tailscale) stays open with its lean. Next: the v77–v101 review, then the v1 plan |
 | 2026-11-11 | Repo seeded (step 1 of the sequence) | Reference copy of Chromebook v101 (`68113ff`), `.gitattributes`, `.gitignore`, `.gitleaks.toml`, lint CI, this plan, `AGENTS.md` / `CLAUDE.md`, README; draft PR for review. No open question decided |
