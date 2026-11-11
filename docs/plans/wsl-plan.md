@@ -61,7 +61,7 @@ went native.
 | 2026-09-25 | **Tag release notes with portability** ("ports to the other bundle: yes / no / n.a.") so platform-neutral fixes get applied to both. *Confirmed 2026-11-11.* | windows-plan.md; handoff §2 |
 | 2026-09-25 | **A shared `dev-common.sh` only later**, and only if porting fixes becomes a chore (it would touch the Chromebook bundle). *Confirmed 2026-11-11.* | windows-plan.md; handoff §2 |
 | 2026-09-25 | **A Windows-host script** (proposed `dev-host-windows.ps1`) for what has no Chromebook counterpart; it runs first, then hands off to the bash scripts inside WSL. Scope below. Named `dev-host-wsl.ps1` on 2026-11-11 (Q2). | windows-plan.md; handoff §2 |
-| 2026-11-11 | **Windows version:** Windows 11 22H2 or later on all four laptops, stated as the minimum because mirrored networking needs it. | PR #1 review (chat) |
+| 2026-11-11 | **Windows version:** Windows 11 22H2 or later on all four laptops. 22H2 is stated as the minimum: needed when mirrored networking comes with Q8. | PR #1 review (chat); reason reworded in the PR #1 follow-up |
 | 2026-11-11 | **Inherited comments:** The fork keeps the Chromebook scripts' tagged comments. A Crostini comment goes only when the code it explains changes or is removed; its replacement is tagged `v1:` with the WSL reason. Supersedes the imported line "the Crostini history in comments can go" (Bundle approach). | PR #1 review (chat) |
 | 2026-11-11 | **reference/:** Holds the v101 copy minus `CLAUDE.md`: its `@AGENTS.md` import would load the Chromebook rules into any Claude Code session that reads files under `reference/`. An owner-approved exception to the read-only rule. | PR #1 review (chat) |
 | 2026-11-11 | **License:** MIT at the root, as in the Chromebook repo. | PR #1 review (chat) |
@@ -82,6 +82,9 @@ went native.
 | 2026-11-11 | **Q16 InterBase:** In WSL (ports as-is; opt-in). | PR #1 review (chat) |
 | 2026-11-11 | **Q17 DDEV ports:** Keep 8080/8443, as on the Chromebooks. | PR #1 review (chat) |
 | 2026-11-11 | **Q18 `.wslconfig`:** The host script sets memory to about 75% of host RAM (24 GB on the 32 GB laptops, 12 GB on the 16 GB ones), adds swap, and enables sparse VHD so freed space returns to Windows. Exact settings are confirmed on the first d3 run. | PR #1 review (chat) |
+| 2026-11-11 | **Refused flags in groups (Q13):** Any group, including `install-all`, skips a refused member with a notice. Naming a refused flag directly stops before anything installs, with the reason. | PR #1 follow-up (chat) |
+| 2026-11-11 | **Docker Desktop and the host script (Q4):** `dev-host-wsl.ps1` checks Docker Desktop's WSL integration for this distro and reports it; it doesn't change Docker Desktop's settings. Setup's preflight is the enforcement. | PR #1 follow-up (chat) |
+| 2026-11-11 | **Networking in v1:** v1 keeps WSL's default NAT networking. Windows browsers reach WSL services through localhost forwarding (DDEV at `localhost:8080` / `8443`). Mirrored networking comes with Q8. | PR #1 follow-up (chat) |
 
 ## Target machines *(windows-plan)*
 
@@ -94,8 +97,8 @@ d3 is the strongest box and the natural home for local models; d4 has the RAM bu
 | 109.hpp.d2 | HP Pavilion 15" | i5-10210U | 16 GB | 1 TB | Intel UHD | Dev box, CPU only |
 | 109.hpr.d4 | HP 14" | Pentium Silver N5030 (no AVX/AVX2) | 32 GB | 500 GB | Intel UHD 605 | Light dev; cloud-model client |
 
-All four are x86-64 and run Windows 11 22H2 or later (Decisions, "Windows version"). First real runs are
-on d3 (Q12).
+All four are x86-64 and run Windows 11 22H2 or later (Decisions, "Windows version"); the 22H2 minimum is
+needed when mirrored networking comes with Q8. First real runs are on d3 (Q12).
 
 **Per-machine notes** (2026-11-11):
 
@@ -141,7 +144,8 @@ to the bash scripts inside WSL:
 - enabling WSL and installing the distro
 - `wsl.conf`: `[boot] systemd=true`, and `appendWindowsPath=false` (Q9)
 - `.wslconfig`: memory at about 75% of host RAM, swap, and sparse VHD (Q18)
-- Docker Desktop's WSL integration off (Q4: docker-ce inside WSL)
+- check and report Docker Desktop's WSL integration (Q4): the host script doesn't change Docker
+  Desktop's settings; setup's preflight is the enforcement
 - usbipd-win
 - mkcert trust on Windows
 - later version: Windows-side VS Code, Cursor and Devin with their WSL remote extensions (Q6)
@@ -152,7 +156,9 @@ to the bash scripts inside WSL:
 > and the native/WSL split between the two Windows repos. The "Where on Windows" column is the Sep 2026
 > proposal. The 2026-11-11 decisions supersede it for Docker (Q4: docker-ce inside WSL), editors (Q6:
 > WSLg apps in v1), Ollama (Q5: inside WSL in v1), Android (Q10) and InterBase (Q16: in WSL); the table
-> is left as imported. Flags added after v80 are listed under "Not yet reviewed".
+> is left as imported. install-godot, install-antigravity and install-media also stay WSL installs in v1,
+> not "Windows host" as their rows say (straight fork, Q13). Flags added after v80 are listed under "Not
+> yet reviewed".
 
 Most flags port to WSL almost unchanged; the work concentrates in GPU, GUI apps, Docker and Android. This
 map is a first pass from the v77 flag list, updated for v80 (install-interbase, install-ollama-containers,
@@ -208,7 +214,7 @@ only)" in the Status column, so the review stays complete.
 | WSL hazard | Bundle location | Running from `/mnt/c` puts `assets/` on the Windows filesystem: slow, and setuid `chrome-sandbox`, exec bits, pipx and venv paths break | Preflight refuses `/mnt/*`; keep the bundle inside the Linux home | Applies |
 | WSL hazard | Line endings | Scripts passed through Windows Git or an editor get CRLF: `$'\r': command not found` | Preflight check for CRLF | Applies; `.gitattributes` (forcing LF) added 2026-11-11 |
 | WSL hazard | Resources | WSL caps memory at 50% of host RAM; inotify watches may fall under the test's 30000 | Size memory in `.wslconfig`; `sysctl` for inotify | Applies; memory and swap sized by the host script (Q18) |
-| WSL hazard | Docker Desktop | Its WSL integration conflicts with docker-ce | Preflight stops if active | Applies; decided: docker-ce inside WSL; preflight stops if the integration is on for this distro (Q4) |
+| WSL hazard | Docker Desktop | Its WSL integration conflicts with docker-ce | Preflight stops if active | Applies; decided: docker-ce inside WSL; preflight stops if the integration is on for this distro (Q4). The host script checks and reports it, and changes nothing in Docker Desktop |
 | WSL hazard | Ubuntu 25.10+ | sudo-rs and Rust coreutils replace sudo and GNU coreutils; the scripts rely on `timeout -k`, `stat -c`, `readlink -f`, `setsid -w` | Confirm on a full test run | n/a (Ubuntu only) |
 
 **Preflight** to add at the top of setup *(handoff §3)*: CRLF, running from `/mnt/*`, systemd not running,
@@ -317,7 +323,8 @@ Sources: [Ollama DeepSeek models](https://ollama.com/search?q=deepseek) ·
 > alone; and **the MCP sharing port is 8770** (since v89), not 8000 as the table says. Where Tailscale
 > runs is open question 8 (lean: Windows host with mirrored networking). Decided 2026-11-11:
 > install-lan and install-lan-share are not in v1 (Q13); DDEV keeps 8080/8443 (Q17); the Ollama row's
-> native Ollama is a later option (Q5).
+> native Ollama is a later option (Q5). v1 keeps WSL's default NAT networking; the mirrored networking
+> described below comes with Q8 (Decisions, "Networking in v1").
 
 The Chromebook bundle's v84 adds `install-lan` (an address book, `LAN_HOSTS`, written into /etc/hosts,
 and a `lan` command) and `install-lan-share` (a relay that shares a Chromebook's services). The Windows
@@ -392,7 +399,7 @@ details follow from questions 2–6).
 
 1. **Seed the repo** (Claude Code, cloud) — prompt in `dev-setup-windows-wsl-kickoff-prompt.md`:
    reference copy of v101, adapted AGENTS.md + CLAUDE.md, imported plan doc, `.gitattributes`, lint CI.
-   Draft PR, reviewed in chat, merged by Damien.
+   Draft PR, reviewed in chat, merged by Damien. *Done 2026-11-11 (PR #1 merged).*
 2. **Settle the open questions** in chat (at least 1–7 and 13), recorded in the plan doc. *Done
    2026-11-11 (PR #1 review); Q8 stays open.*
 3. **WSL review of v77–v101** (Claude Code, cloud, read-only): extend the compatibility table.
@@ -406,6 +413,7 @@ details follow from questions 2–6).
 
 | Date | Topic | Outcome |
 | --- | --- | --- |
+| 2026-11-11 | PR #1 follow-up: three decisions | Refused flags in groups (Q13): any group, including `install-all`, skips a refused member with a notice, and naming a refused flag directly stops before anything installs. Docker Desktop (Q4): the host script checks its WSL integration for this distro and reports it, changing nothing; setup's preflight is the enforcement. Networking: v1 keeps WSL's default NAT, Windows browsers reach WSL services through localhost forwarding (DDEV at `localhost:8080` / `8443`), and mirrored networking comes with Q8. Brought in line: the host-script scope, the reason for the 22H2 minimum (needed when mirrored networking comes with Q8), the porting map note (install-godot, install-antigravity and install-media stay WSL installs in v1), and step 1 of the sequence marked done |
 | 2026-11-11 | PR #1 review: open questions decided | Q1–Q7 and Q9–Q16 decided, plus two new ones (Q17 DDEV ports, Q18 `.wslconfig`): v1 numbering; `-wsl` script names with `dev-host-wsl.ps1` sharing the version; docker-ce in WSL; Ollama in WSL for v1; WSLg editors in v1; NOPASSWD sudo drop-in; `appendWindowsPath=false`; install-android-native, install-lan, install-lan-share, install-retro and install-com on v1's "not yet supported on WSL" list; first runs on d3, d4 before done; one bundle, no tiers; InterBase in WSL; DDEV 8080/8443; `.wslconfig` at ~75% RAM with swap and sparse VHD. Also: Windows 11 22H2 minimum, inherited comments kept, `reference/` without `CLAUDE.md`, MIT license; the diffable-fork, portability-tag and `dev-common.sh` rows confirmed. Q8 (Tailscale) stays open with its lean. Next: the v77–v101 review, then the v1 plan |
 | 2026-11-11 | Repo seeded (step 1 of the sequence) | Reference copy of Chromebook v101 (`68113ff`), `.gitattributes`, `.gitignore`, `.gitleaks.toml`, lint CI, this plan, `AGENTS.md` / `CLAUDE.md`, README; draft PR for review. No open question decided |
 | 2026-11-11 | New project: dev-setup-windows-wsl | Handoff prepared in the dev-setup-chromebook project space; revives the Sep 25–27 WSL plan on Debian 13, forked from Chromebook v101, as a separate repo alongside the native dev-setup-windows |
