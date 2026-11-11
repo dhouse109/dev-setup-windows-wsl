@@ -9,8 +9,9 @@ Edit `AGENTS.md`; do not duplicate the rules or replace `CLAUDE.md` with a symli
 free of symlinks: Git for Windows often checks them out as plain text files (CI checks for them).
 
 Adapted from dev-setup-chromebook's `AGENTS.md` at v101 (copy in `reference/dev-setup-chromebook/`).
-`reference/dev-setup-chromebook/AGENTS.md` and its `CLAUDE.md` are that repo's rules: if your tool loads
-them while you read files under `reference/`, they describe the Chromebook repo, not this one.
+`reference/dev-setup-chromebook/AGENTS.md` is that repo's rules file: it describes the Chromebook repo,
+not this one. The copy leaves out that repo's `CLAUDE.md` on purpose, so its `@AGENTS.md` import never
+loads the Chromebook rules into a session here.
 
 ## What this repo is
 
@@ -157,8 +158,8 @@ terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any 
      repo).
   2. Delete `reference/dev-setup-chromebook/` and extract the same file list from the tag with
      `git archive vNN <files> | tar -x -C reference/dev-setup-chromebook` (the four scripts,
-     `CHANGELOG.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `LICENSE`, `docs/`), so the copy is byte for
-     byte.
+     `CHANGELOG.md`, `README.md`, `AGENTS.md`, `LICENSE`, `docs/`; never `CLAUDE.md`), so the copy is
+     byte for byte.
   3. Update `reference/README.md` (tag, commit SHA, copy date) and the fork-source line in
      `docs/plans/wsl-plan.md`.
   4. Then, in later commits, review the Chromebook CHANGELOG between the old and new tags and port what

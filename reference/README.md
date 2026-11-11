@@ -10,21 +10,24 @@ What the copy holds, byte for byte from the tag (extracted with `git archive v10
 
 - the four scripts: `dev-setup-chromebook.sh`, `dev-test-chromebook.sh`, `dev-init-chromebook.sh`,
   `dev-demo-chromebook.sh`
-- `CHANGELOG.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `LICENSE`
+- `CHANGELOG.md`, `README.md`, `AGENTS.md`, `LICENSE`
 - `docs/`, all of it, including `docs/plans/`
 
 Left out: the Chromebook repo's `tests/`, `.github/`, `.gitignore` and `.gitleaks.toml`. This repo has
 its own CI, `.gitignore` and `.gitleaks.toml`, adapted from those.
 
-`dev-setup-chromebook/AGENTS.md` and `CLAUDE.md` are the **Chromebook repo's** rules. A coding agent that
-loads them while reading files in this folder should take them as describing that repo, not this one;
-this repo's rules are in the top-level `AGENTS.md`.
+**`CLAUDE.md` is left out on purpose** (owner-approved exception to the read-only rule, 2026-11-11). Its
+`@AGENTS.md` import would load the Chromebook repo's rules into any Claude Code session that reads files
+under `reference/`. It was in the first copy and removed in a commit of its own.
+
+`dev-setup-chromebook/AGENTS.md` is the **Chromebook repo's** rules file. A coding agent that reads it
+should take it as describing that repo, not this one; this repo's rules are in the top-level `AGENTS.md`.
 
 ## Rules
 
-- **Never edit anything in this folder.** It is a snapshot of a published Chromebook release, not
+- **Never edit anything in this folder** (the one exception is leaving out `CLAUDE.md`, above). It is a snapshot of a published Chromebook release, not
   working code. Don't run the scripts either (their host guard stops them anywhere but ChromeOS, and
   `DEV_BUNDLE_ANY_HOST` is never set to get past it).
 - **Refresh only by replacing it wholesale** with a newer Chromebook tag, in a commit of its own:
-  delete `dev-setup-chromebook/`, extract the same file list from the new tag with `git archive`, and
-  update the table above (tag, commit SHA, copy date).
+  delete `dev-setup-chromebook/`, extract the same file list from the new tag with `git archive` (still
+  without `CLAUDE.md`), and update the table above (tag, commit SHA, copy date).
