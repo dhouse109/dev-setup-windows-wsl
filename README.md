@@ -3,11 +3,11 @@
 A bash bundle that will turn **Debian 13 (trixie) on WSL2** on Windows laptops into the same development
 machine as the Chromebooks: a fork of
 [dev-setup-chromebook](https://github.com/dhouse109/dev-setup-chromebook) with the same four scripts
-(setup, test, init, demo), the same flags and the same conventions, plus a planned Windows-host
-PowerShell script for what has no Chromebook counterpart (enabling WSL, `wsl.conf` / `.wslconfig` and
-the like).
+(`dev-setup-wsl.sh`, `dev-test-wsl.sh`, `dev-init-wsl.sh`, `dev-demo-wsl.sh`), the same flags and the same
+conventions, plus a Windows-host PowerShell script, `dev-host-wsl.ps1`, that runs first for what has no
+Chromebook counterpart (enabling WSL, `wsl.conf` / `.wslconfig` and the like).
 
-**Planned, not yet built.** No scripts exist yet; the open questions in the plan come first.
+**Planned, not yet built.** Decisions for v1 are recorded: open questions 1–7 and 13 were settled on 2026-11-11. Next comes the WSL review of v77–v101, then the v1 plan; the scripts start after the v1 plan.
 
 Current version: none yet.
 

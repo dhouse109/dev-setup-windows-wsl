@@ -21,30 +21,35 @@ conventions. Most tools install inside WSL as Linux tools, just as on a Chromebo
 published as is. The owner decides what goes in and runs every version on the laptops; the coding agent
 drafts, reviews and fixes the scripts.
 
-**Status: planning; nothing is built.** The scripts are not written yet, and their names are open
-(open question 2 in `docs/plans/wsl-plan.md`), so they are described by role:
+**Status: planning; nothing is built.** Decisions for v1 are recorded: open questions 1–7 and 13 were settled on 2026-11-11. Next comes the WSL review of v77–v101, then the v1 plan; the scripts start after the v1 plan.
 
-| Script (name TBD) | Role |
+The scripts to come (names decided 2026-11-11, open question 2 in `docs/plans/wsl-plan.md`):
+
+| Script | Role |
 |---|---|
-| setup | Installer. Unattended, idempotent, safe to rerun. Runs inside the Debian WSL distro. |
-| init | Logins, API keys and config, read from `~/.config/dev-init/secrets.env`. |
-| test | Verifies every installed component works (PASS/FAIL/WARN/SKIP) and writes a per-stack disk report. |
-| demo | Optional. Installs runnable demos into `~/dev-demo`. Outside the test/checklist loop. |
-| Windows host (planned, PowerShell) | Runs first, on Windows: enables WSL and installs the distro, writes `wsl.conf` / `.wslconfig`, and covers what has no Chromebook counterpart. Scope and name in the plan. |
+| `dev-host-wsl.ps1` | Windows host (PowerShell). Runs first, on Windows: enables WSL and installs the distro, writes `wsl.conf` / `.wslconfig`, and covers what has no Chromebook counterpart. Scope in the plan. |
+| `dev-setup-wsl.sh` | Installer. Unattended, idempotent, safe to rerun. Runs inside the Debian WSL distro. |
+| `dev-init-wsl.sh` | Logins, API keys and config, read from `~/.config/dev-init/secrets.env`. |
+| `dev-test-wsl.sh` | Verifies every installed component works (PASS/FAIL/WARN/SKIP) and writes a per-stack disk report. |
+| `dev-demo-wsl.sh` | Optional. Installs runnable demos into `~/dev-demo`. Outside the test/checklist loop. |
+
+The `-wsl` names keep them apart from dev-setup-windows' native scripts on the same laptop.
 
 The four bash scripts take the **same flags** with the **same flag-expansion logic** as the Chromebook
 bundle (the `FLAG EXPANSION` block near the top of each script: `install-all` → groups → members →
 dependencies). A flag added to one script is added to all four, even if some only expand it.
 
-Run order inside WSL, as on the Chromebooks: **init → setup → init → test** (first init only writes the
-secrets template). The host script's place in that order is set by the plan.
+Run order: **`dev-host-wsl.ps1` on Windows first**, then **init → setup → init → test** inside WSL, as on
+the Chromebooks (first init only writes the secrets template).
 
 What exists now: `docs/plans/wsl-plan.md` (decisions, the WSL compatibility review, open questions),
-`reference/dev-setup-chromebook/` (read-only copy of Chromebook v101, the fork source), lint CI.
+`reference/dev-setup-chromebook/` (read-only copy of Chromebook v101, the fork source), lint CI, and an
+MIT `LICENSE`.
 
 ## Target environment
 
-- **Windows 11 laptops with WSL2, Debian 13 (trixie), x86-64.**
+- **Windows 11 22H2 or later** (the minimum, because mirrored networking needs it), **WSL2, Debian 13
+  (trixie), x86-64.**
 - Machines (details in `docs/plans/wsl-plan.md`, "Target machines"):
 
   | Machine | CPU | RAM | Disk | GPU |
@@ -54,18 +59,24 @@ What exists now: `docs/plans/wsl-plan.md` (decisions, the WSL compatibility revi
   | 109.hpp.d2 | i5-10210U | 16 GB | 1 TB | Intel UHD |
   | 109.hpr.d4 | Pentium Silver N5030 (no AVX/AVX2) | 32 GB | 500 GB | Intel UHD 605 |
 
+  First real runs are on d3. d4 gets a run before the bundle is called done: it has no AVX, so MongoDB
+  5+ can't run there. One bundle for all four, no tiers; flags are chosen per machine.
+
 - **WSL hazards** the scripts must handle (the plan's compatibility review has the full list and fixes):
   - **systemd** must be on (`[boot] systemd=true` in `/etc/wsl.conf`, then `wsl --shutdown`); Docker,
-    kind, Langfuse and the Ollama drop-in need it, and Debian's WSL image likely leaves it off.
+    kind, Langfuse and the Ollama drop-in need it, and Debian's WSL image likely leaves it off. The host
+    script sets it.
   - **Windows PATH interop:** Windows `npm` / `code` shims on the appended Windows PATH can satisfy
-    `command -v` checks when the Linux tool is missing.
+    `command -v` checks when the Linux tool is missing. The host script sets `appendWindowsPath=false`
+    in `wsl.conf`.
   - **`/mnt/*`:** the bundle never runs from the Windows filesystem (`/mnt/c/...`): exec bits, setuid
     sandboxes, pipx and venv paths break, and it is slow. It lives in the Linux home.
   - **CRLF:** a script that passed through Windows Git or a Windows editor fails with
     `$'\r': command not found`. `.gitattributes` keeps every text file LF (`*.ps1` CRLF).
-  - **Memory cap:** WSL gets 50% of host RAM by default; inotify watches may be low. Sized in
-    `.wslconfig` and with `sysctl`.
-  - **Docker Desktop:** its WSL integration conflicts with docker-ce inside the distro.
+  - **Memory cap:** WSL gets 50% of host RAM by default; inotify watches may be low. The host script
+    sizes `.wslconfig` (about 75% of host RAM, plus swap and sparse VHD); inotify via `sysctl`.
+  - **Docker Desktop:** its WSL integration conflicts with docker-ce inside the distro. The bundle uses
+    docker-ce; setup's preflight stops if the integration is on for this distro.
   - Also: GPU is WSLg's `/dev/dxg` + Mesa D3D12 (no virgl, `renderD128` or sommelier); links open with
     `wslview` in the Windows default browser; disk freed inside WSL does not return to Windows until the
     VHDX is compacted.
@@ -107,19 +118,21 @@ terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any 
 
 ## Rules that never change
 
-1. **One version number for the bundle.** Any change to any script bumps **every** script to the same
-   version, including scripts with no code change ("version bump only" in the changelog), and every
-   place the version string appears gets updated. **TBD until the plan settles numbering and names**
-   (open questions 1–3): where numbering starts, the script names, whether the Windows host script shares
-   the number, and the exact places the string appears (the Chromebook bundle's list is in
-   `reference/dev-setup-chromebook/AGENTS.md`, rule 1). Once settled, this rule lists them and gives the
-   `grep` that must show only the new number.
-2. **CHANGELOG.md** has one section per script, newest version first. Every version gets an entry under
+1. **One version number for the bundle.** Numbering starts at **v1** (based on Chromebook v101). Any
+   change to any script bumps **all five** to the same version, including scripts with no code change
+   ("version bump only" in the changelog): `dev-setup-wsl.sh`, `dev-init-wsl.sh`, `dev-test-wsl.sh`,
+   `dev-demo-wsl.sh` and `dev-host-wsl.ps1`. Every place the version string appears gets updated. The
+   list of those places and the `grep` that must show only the new number come with the v1 build, once
+   the forked scripts and the host script's version line exist (the Chromebook bundle's list is in
+   `reference/dev-setup-chromebook/AGENTS.md`, rule 1).
+2. **CHANGELOG.md** has one section per script (five, including the host script), newest version first. Every version gets an entry under
    every script; a script with no change gets "version bump only". Each entry says whether it ports to
    dev-setup-chromebook (yes / no / n.a.).
 3. **Code comments carry the why**, tagged with the version that added them and, for fixes, the dated
-   finding (`# v1: … (Nov 20 2026: …)`). Keep existing tagged comments, including the Chromebook ones
-   the fork inherits; they are the design record.
+   finding (`# v1: … (Nov 20 2026: …)`). Keep existing tagged comments; they are the design record.
+   **Inherited comments:** the fork keeps the Chromebook scripts' tagged comments. A Crostini comment
+   goes only when the code it explains changes or is removed, and its replacement is tagged `v1:` (or
+   the current version) with the WSL reason.
 4. **Nothing loose in `$HOME`.** Files the scripts create for the user to keep (logs, downloads,
    generated helpers, disk-report TSVs) go in `./assets` next to the scripts (`$ASSETS`). Commands go in
    `~/.local/bin`; config in `~/.config/...`.
@@ -169,6 +182,10 @@ terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any 
 
 Once the scripts exist, update in the same change:
 - all four bash scripts (flag expansion at minimum), and the host script if the change has a Windows side
+- the **"not yet supported on WSL" list**: flags not yet ported are refused at flag expansion from one
+  short list, and `install-all` skips them with a notice (v1's list: install-lan, install-lan-share,
+  install-android-native, install-retro, install-com; the v77–v101 review may add to it). A flag that
+  becomes supported comes off the list in all four scripts
 - test: checks for the new behaviour (`check` = FAIL if missing, `warn` for user-changeable settings),
   and the disk report's line for that stack
 - the init checklist doc: run order, flags, secrets variables, manual steps
@@ -203,7 +220,7 @@ Once the scripts exist, update in the same change:
     `reference/` is not linted)
   - no secrets (gitleaks runs in CI; `.gitleaks.toml` has the two known false positives)
   - no tracked symlinks
-  - once the host script exists: a PowerShell parse check and PSScriptAnalyzer at Error severity
+  - once `dev-host-wsl.ps1` exists: a PowerShell parse check and PSScriptAnalyzer at Error severity
 - **A version isn't done until its test run in WSL on a laptop is clean** (FAIL 0; WARNs only for
   optional credentials). Until then, describe it as "built, not yet confirmed run in WSL".
 - **Release:** after a clean run, merge, delete the merged branch, tag `vNN`, and publish a GitHub
@@ -214,6 +231,9 @@ Once the scripts exist, update in the same change:
 
 ## Known open items
 
-Everything in "Open questions" in `docs/plans/wsl-plan.md`. Nothing there is decided until the owner
-says so and it is recorded in that doc's Decisions table and discussion log. No script is written until
-at least questions 1–7 and 13 are settled.
+Decisions for v1 are recorded: open questions 1–7 and 13 were settled on 2026-11-11. Next comes the WSL review of v77–v101, then the v1 plan; the scripts start after the v1 plan.
+
+Still open: Q8 (Tailscale and LAN sharing; lean: Tailscale on the Windows host, decided when a version
+ports install-lan) and the step 3 review (WSL review of v77–v101), both in `docs/plans/wsl-plan.md`.
+Nothing there is decided until the owner says so and it is recorded in that doc's Decisions table and
+discussion log.
