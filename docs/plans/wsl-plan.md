@@ -72,7 +72,7 @@ went native.
 | 2026-11-11 | **Q5 Ollama:** Inside WSL for v1 (CUDA on d1, CPU elsewhere). Native Windows Ollama on d3 comes later, after benchmarking, as an option that points `OLLAMA_HOST` at the host. | PR #1 review (chat) |
 | 2026-11-11 | **Q6 Editors:** WSLg Linux apps in v1 for all four editors (straight port). Windows-side VS Code, Cursor and Devin with WSL remote come later through the host script. Lazarus stays a WSLg app. | PR #1 review (chat) |
 | 2026-11-11 | **Q7 sudo:** NOPASSWD drop-in in `/etc/sudoers.d/`, validated with `visudo -c`. The account keeps its password and `passwd -d` is dropped. The test keeps `sudo -n true`. | PR #1 review (chat) |
-| 2026-11-11 | **Q9 Coexistence:** The host script sets `appendWindowsPath=false` in `wsl.conf`. With the docker-ce preflight and distinct script names, both bundles can live on one laptop. Verify that `wslview` works with the Windows PATH off on the first run. | PR #1 review (chat) |
+| 2026-11-11 | **Q9 Coexistence:** The host script sets `appendWindowsPath=false` in `wsl.conf`. With the docker-ce preflight and distinct script names, both bundles can live on one laptop. Verify that `wslview` works with the Windows PATH off on the first run. *Note (2026-11-11, PR #2 review): no `wslview`; the bundle's own opener calls Windows by absolute path (Q19).* | PR #1 review (chat) |
 | 2026-11-11 | **Q10 Android:** `install-android-native` is out of v1. `install-mobile` stays, minus the `adb connect arc` steps (the step 3 review confirms this). Later: Studio and the emulator on Windows, with devices reached through the Windows adb server. | PR #1 review (chat) |
 | 2026-11-11 | **Q11 Retro and COM:** In WSL for parity, in a later version. | PR #1 review (chat) |
 | 2026-11-11 | **Q12 Machines:** First real runs on 109.hpe.d3. Run d4 before calling the bundle done (it has no AVX, and MongoDB 5+ needs AVX); recorded as a per-machine note under Target machines. | PR #1 review (chat) |
@@ -81,7 +81,7 @@ went native.
 | 2026-11-11 | **Q15 d3 serving models:** Not by default. Decided together with Q5's later option and Q8. | PR #1 review (chat) |
 | 2026-11-11 | **Q16 InterBase:** In WSL (ports as-is; opt-in). | PR #1 review (chat) |
 | 2026-11-11 | **Q17 DDEV ports:** Keep 8080/8443, as on the Chromebooks. | PR #1 review (chat) |
-| 2026-11-11 | **Q18 `.wslconfig`:** The host script sets memory to about 75% of host RAM (24 GB on the 32 GB laptops, 12 GB on the 16 GB ones), adds swap, and enables sparse VHD so freed space returns to Windows. Exact settings are confirmed on the first d3 run. | PR #1 review (chat) |
+| 2026-11-11 | **Q18 `.wslconfig`:** The host script sets memory to about 75% of host RAM (24 GB on the 32 GB laptops, 12 GB on the 16 GB ones), adds swap, and enables sparse VHD so freed space returns to Windows. Exact settings are confirmed on the first d3 run. *Note (2026-11-11, PR #2 review): the sparse VHD part is restated in Q26. It is an experimental setting that applies to newly created disks, so the host script writes it before installing the distro and never passes `--allow-unsafe`.* | PR #1 review (chat) |
 | 2026-11-11 | **Refused flags in groups (Q13):** Any group, including `install-all`, skips a refused member with a notice. Naming a refused flag directly stops before anything installs, with the reason. | PR #1 follow-up (chat) |
 | 2026-11-11 | **Docker Desktop and the host script (Q4):** `dev-host-wsl.ps1` checks Docker Desktop's WSL integration for this distro and reports it; it doesn't change Docker Desktop's settings. Setup's preflight is the enforcement. | PR #1 follow-up (chat) |
 | 2026-11-11 | **Networking in v1:** v1 keeps WSL's default NAT networking. Windows browsers reach WSL services through localhost forwarding (DDEV at `localhost:8080` / `8443`). Mirrored networking comes with Q8. | PR #1 follow-up (chat) |
@@ -155,15 +155,22 @@ branch.
 ## Windows-host script scope *(windows-plan, handoff §2; updated 2026-11-11)*
 
 `dev-host-wsl.ps1` covers what has no Chromebook counterpart. It runs first, on Windows, then hands off
-to the bash scripts inside WSL:
+to the bash scripts inside WSL. In the order it does them *(reordered and extended 2026-11-11, PR #2
+review; the build spec is in [v1-plan.md](v1-plan.md), stage 7)*:
 
-- enabling WSL and installing the distro
+- enabling WSL
+- `.wslconfig`: memory at about 75% of host RAM and swap (Q18), and `sparseVhd=true`, written **before**
+  the distro is installed so its disk is created sparse; never `--allow-unsafe` (Q26). No networking
+  line: v1 keeps the default NAT (Decisions, "Networking in v1")
+- installing the distro; the owner then creates the user account at its first launch
 - `wsl.conf`: `[boot] systemd=true`, and `appendWindowsPath=false` (Q9)
-- `.wslconfig`: memory at about 75% of host RAM, swap, and sparse VHD (Q18)
+- the sudoers NOPASSWD drop-in, written as root once the user account exists, checked with `visudo -c`
+  (Q7, Q21)
+- mkcert on Windows: `mkcert -install` there, then `CAROOT` shared into WSL through `WSLENV`, **before**
+  setup runs (Q24)
 - check and report Docker Desktop's WSL integration (Q4): the host script doesn't change Docker
   Desktop's settings; setup's preflight is the enforcement
-- usbipd-win
-- mkcert trust on Windows
+- later version: usbipd-win, with Android (Q34; dropped from v1, where nothing attaches a USB device)
 - later version: Windows-side VS Code, Cursor and Devin with their WSL remote extensions (Q6)
 
 ## Porting map *(windows-plan)*
@@ -174,7 +181,7 @@ to the bash scripts inside WSL:
 > WSLg apps in v1), Ollama (Q5: inside WSL in v1), Android (Q10) and InterBase (Q16: in WSL); the table
 > is left as imported. install-godot, install-antigravity and install-media also stay WSL installs in v1,
 > not "Windows host" as their rows say (straight fork, Q13). Flags added after v80 are listed under
-> "v77–v101: reviewed 2026-11-11, pending owner review".
+> "v77–v101: reviewed 2026-11-11, owner review done".
 
 Most flags port to WSL almost unchanged; the work concentrates in GPU, GUI apps, Docker and Android. This
 map is a first pass from the v77 flag list, updated for v80 (install-interbase, install-ollama-containers,
@@ -219,30 +226,36 @@ only)" in the Status column, so the review stays complete.
 | Breaks the run | Microsoft prod repo (Ubuntu) | `config/debian/${VERSION_ID}` becomes `debian/24.04` and 404s, so install-dotnet and install-db fail; Ubuntu also packages .NET itself | Per-distro repo path; pin .NET to one source; align the test's `packages-microsoft-prod` checks | n/a (Ubuntu only) |
 | Breaks the run | Base apt list (Ubuntu) | `libasound2` and `libappindicator3-1` have no candidate on 24.04+; `libfuse2` may need `libfuse2t64` by name; one miss kills the whole install | Distro package map for the t64 and Ayatana names | n/a (Ubuntu only) |
 | Breaks the run | systemd (Debian on WSL) | Docker, kind, Langfuse and the Ollama drop-in need it; Ubuntu's WSL image enables it, Debian's likely does not | Preflight check; `[boot] systemd=true` in `/etc/wsl.conf`, then `wsl --shutdown` | Applies; the host script sets it (host-script scope) |
-| Wrong for Windows | `sudo passwd -d $USER` | Removes the Linux account's password on a Windows laptop; the test expects `sudo -n true` | Choose a sudo policy (NOPASSWD drop-in, or keep the password) and align the test | Applies; decided: NOPASSWD drop-in, password kept, `passwd -d` dropped (Q7) |
+| Wrong for Windows | `sudo passwd -d $USER` | Removes the Linux account's password on a Windows laptop; the test expects `sudo -n true` | Choose a sudo policy (NOPASSWD drop-in, or keep the password) and align the test | Applies; decided: NOPASSWD drop-in, password kept, `passwd -d` dropped (Q7); the host script writes the drop-in (Q21) |
 | Wrong for Windows | GPU | WSLg uses `/dev/dxg` and Mesa D3D12: no virgl, no `renderD128`, no sommelier, so those test checks fail even when accelerated | Skip the video/render groups; test accepts D3D12 and fails only on llvmpipe; Godot keeps `opengl3` | Applies |
-| Wrong for Windows | Android | The `-cros.deb` Studio build and `adb connect arc` (setup, test, init) are ChromeOS-only; the emulator needs nested virtualization for `/dev/kvm` | Generic Linux tarball or Studio on Windows; devices via usbipd-win or the Windows adb server | Applies; decided: install-android-native out of v1, install-mobile minus `adb connect arc` (Q10) |
-| Wrong for Windows | Browser opening | `demo_open` falls back to `xdg-open`, which opens Linux Chrome in WSLg; init's gh, codex and gcloud logins do the same | Install `wslu`; `demo_open` and `BROWSER` use `wslview` | Applies |
-| Wrong for Windows | Editors and launchers | VS Code, Cursor and Windsurf install as Linux GUI apps; `.desktop` entries appear in the Windows Start menu via WSLg | Windows-side editors attached through their WSL remote extension; reword the launcher text | Applies; decided: WSLg Linux apps in v1, Windows-side editors later through the host script (Q6) |
-| Wrong for Windows | mkcert | CA trusted in Linux only, so a Windows browser warns on DDEV sites | Windows-side trust step, printed as instructions | Applies |
+| Wrong for Windows | Android | The `-cros.deb` Studio build and `adb connect arc` (setup, test, init) are ChromeOS-only; the emulator needs nested virtualization for `/dev/kvm` | Generic Linux tarball or Studio on Windows; devices via usbipd-win or the Windows adb server | Applies; decided: install-android-native out of v1, install-mobile minus `adb connect arc` (Q10). *Note (2026-11-11, PR #2 review): setup has `adb connect arc` only in install-android-native's closing text; install-mobile's steps are in init and test (and in one demo of the refused flag). Init prints one skip line, the test drops its WARN, and usbipd-win is not in v1 (Q34).* |
+| Wrong for Windows | Browser opening | `demo_open` falls back to `xdg-open`, which opens Linux Chrome in WSLg; init's gh, codex and gcloud logins do the same | Install `wslu`; `demo_open` and `BROWSER` use `wslview` | Applies. *Note (2026-11-11, PR #2 review): the fix column is superseded. `wslu` is discontinued upstream and its tools need the Windows PATH that Q9 turns off. The bundle writes its own opener and registers it as an `xdg-mime` handler, which is the Chromebook mechanism (`garcon_host_browser.desktop`), with `BROWSER` set as well (Q19).* |
+| Wrong for Windows | Editors and launchers | VS Code, Cursor and Windsurf install as Linux GUI apps; `.desktop` entries appear in the Windows Start menu via WSLg | Windows-side editors attached through their WSL remote extension; reword the launcher text | Applies; decided: WSLg Linux apps in v1, Windows-side editors later through the host script (Q6). *Note (2026-11-11, PR #2 review): WSLg lists only the system folders in the Start menu, not `~/.local/share/applications`, where the bundle writes its own entries; those go to `/usr/local/share/applications` (Q20). `code` stops to ask a question under WSL unless `DONT_PROMPT_WSL_INSTALL` is set (Q28).* |
+| Wrong for Windows | mkcert | CA trusted in Linux only, so a Windows browser warns on DDEV sites | Windows-side trust step, printed as instructions | Applies; decided: the host script runs `mkcert -install` on Windows and shares `CAROOT` into WSL through `WSLENV`, before setup (Q24) |
 | Wrong for Windows | Messages and hints | "Shut down Linux (right-click Terminal)", balloon notes, the `@chromebook` SSH key comment | `wsl --terminate <distro>` or `wsl --shutdown`; drop the Crostini notes | Applies |
 | WSL hazard | Windows PATH interop | Windows `npm` and `code` shims can satisfy `command -v` checks when the Linux tool is missing | `appendWindowsPath=false` in `wsl.conf`, or a preflight warning | Applies; decided: the host script sets `appendWindowsPath=false` (Q9) |
 | WSL hazard | Bundle location | Running from `/mnt/c` puts `assets/` on the Windows filesystem: slow, and setuid `chrome-sandbox`, exec bits, pipx and venv paths break | Preflight refuses `/mnt/*`; keep the bundle inside the Linux home | Applies |
 | WSL hazard | Line endings | Scripts passed through Windows Git or an editor get CRLF: `$'\r': command not found` | Preflight check for CRLF | Applies; `.gitattributes` (forcing LF) added 2026-11-11 |
-| WSL hazard | Resources | WSL caps memory at 50% of host RAM; inotify watches may fall under the test's 30000 | Size memory in `.wslconfig`; `sysctl` for inotify | Applies; memory and swap sized by the host script (Q18) |
+| WSL hazard | Resources | WSL caps memory at 50% of host RAM; inotify watches may fall under the test's 30000 | Size memory in `.wslconfig`; `sysctl` for inotify | Applies; memory and swap sized by the host script (Q18). *Note (2026-11-11, PR #2 review): the test's inotify check is a WARN, not a FAIL, and its hint already names the `sysctl`; no setup or host-script step is planned unless d3 shows the default is too low. Also: swap defaults to 25% of Windows memory, and WSL hands cached memory back by default (`autoMemoryReclaim`). Sparse VHD is Q26.* |
 | WSL hazard | Docker Desktop | Its WSL integration conflicts with docker-ce | Preflight stops if active | Applies; decided: docker-ce inside WSL; preflight stops if the integration is on for this distro (Q4). The host script checks and reports it, and changes nothing in Docker Desktop |
 | WSL hazard | Ubuntu 25.10+ | sudo-rs and Rust coreutils replace sudo and GNU coreutils; the scripts rely on `timeout -k`, `stat -c`, `readlink -f`, `setsid -w` | Confirm on a full test run | n/a (Ubuntu only) |
 
 **Preflight** to add at the top of setup *(handoff §3)*: CRLF, running from `/mnt/*`, systemd not running,
 Windows PATH appended, Docker Desktop WSL integration active.
 
+*Note (2026-11-11, PR #2 review): three more checks: not running as root, `sudo -n true` works
+(the drop-in is the host script's, Q21), and WSL 2. The preflight sits directly after the host guard and
+before the screen-output block, so a refused run writes nothing (Q29). It also warns when Debian's
+`VERSION_ID` is not 13 (Q23).*
+
 **Host guard** *(handoff §3)*: the Chromebook scripts exit on anything that isn't ChromeOS + Debian; this
 fork's guard checks for WSL (`$WSL_DISTRO_NAME` or `/proc/sys/fs/binfmt_misc/WSLInterop`) + Debian.
 
-## v77–v101: reviewed 2026-11-11, pending owner review *(handoff §4)*
+## v77–v101: reviewed 2026-11-11, owner review done *(handoff §4)*
 
 > **Reviewed 2026-11-11** in [v1-wsl-review.md](v1-wsl-review.md) (step 3 of the suggested sequence),
-> against the v101 code and not only the changelog. **Pending owner review: nothing in it is decided.**
+> against the v101 code and not only the changelog. **The owner reviewed it the same day (PR #2 review)
+> and accepted every Part C recommendation; Q19–Q34 are recorded under Decisions.**
 >
 > - **Part A:** 78 rows, one per flag, stack or behaviour v77–v101 added or changed. 39 are as-is, 7
 >   as-is with a first-run check, 18 need a WSL edit, 2 are ChromeOS-only and get a replacement, 11 sit
@@ -255,8 +268,8 @@ fork's guard checks for WSL (`$WSL_DISTRO_NAME` or `/proc/sys/fs/binfmt_misc/WSL
 >   with a recommendation; 9 items in this doc that the review shows to be wrong or stale; and the
 >   first-run checks for d3.
 >
-> The questions are answered in chat and recorded here under Decisions before the v1 plan is written.
-> The section below is left as it was before the review.
+> The section below is left as it was before the review, with dated notes where the review found it
+> wrong or stale.
 
 The review above covered v76. v77–v101 have not been checked against WSL. The Chromebook `CHANGELOG.md`
 (in `reference/dev-setup-chromebook/`) is authoritative.
@@ -281,6 +294,13 @@ The review above covered v76. v77–v101 have not been checked against WSL. The 
 - install-hermes / install-openclaw
 - *(windows-plan: opt-in `install-godot-templates`)*
 
+*Note (2026-11-11, PR #2 review): checked against v101's flag expansion. One flag is missing from the
+list as a flag: **install-herdr** (v95, in `install-all`), which the paragraph below names only as
+"herdr". Five more are easy to miss because they appear only inside a longer item or an aside:
+install-ollama-containers (v80, opt-in), install-oracle-full (v83, opt-in), install-cloudflared (v89,
+opt-in), install-gitlab-runner (v91, opt-in) and install-vue (v91, in `install-all`). The review's C4
+item 9 said all six were missing; that was wrong for these five and is corrected there.*
+
 **v94–v101:** Lazarus as a Qt5 IDE with light/dark profiles and `lazmode`; herdr and tmux; fpc cthreads in
 `~/.fpc.cfg`; Lazarus/Delphi build and debug from VS Code, Cursor and Devin; Devin Desktop under
 install-windsurf; Linux links open in ChromeOS's browser; DDEV router on 8080/8443; `devmem`,
@@ -292,18 +312,25 @@ workaround; `CLAUDE.md` as an `@AGENTS.md` import instead of a symlink.
 
 - **Host guard and "where you are running" rules** in AGENTS.md: rewritten for WSL.
 - **Browser standard**: ChromeOS's `garcon_host_browser.desktop` becomes `wslview` (Windows default
-  browser).
+  browser). *Note (2026-11-11, PR #2 review): not `wslview`. The handler becomes the bundle's own
+  opener, which calls `rundll32.exe url.dll,FileProtocolHandler` by absolute path (Q19).*
 - **DDEV ports**: 8080/8443 was a ChromeOS workaround (no 80/443 into Linux). WSL can likely use 80/443;
   keep 8080/8443 for parity with install-lan-share, or not. *Decided: keep 8080/8443 (Q17).*
+  *Note (2026-11-11, PR #2 review): keeping them takes an edit. In v101 the step and its test check run
+  only on ChromeOS (`DEV_ON_CHROMEOS`); elsewhere the code leaves DDEV on 80/443 (review items S14 and
+  T12).*
 - **Tailscale**: inside WSL (as on the Chromebooks) or on the Windows host with mirrored networking.
   *Open (Q8); lean: Windows host.*
 - **install-retro**: QEMU with KVM needs nested virtualization inside WSL2; DOSBox-X and Wine run through
   WSLg. Native Windows options exist but break parity. *Decided: in WSL, later version (Q11).*
 - **Crostini-specific fixes** (Devin `--ozone-platform=x11`, Lazarus GTK2 dialog freeze, Android Studio
   XToolkit, memory balloon notes): check whether each still applies under WSLg rather than port blindly.
+  *Note (2026-11-11, PR #2 review): each has a verdict in the review ("Verdicts on the items most likely
+  to behave differently").*
 - **Disk**: space freed inside WSL does not return to Windows until the VHDX is compacted (or sparse VHD
   is enabled), which matters for `devclean` and the disk report. *The host script enables sparse VHD
-  (Q18).*
+  (Q18).* *Note (2026-11-11, PR #2 review): how it does so is Q26. `df` inside WSL also reads the
+  virtual disk's size, so the disk guards take the smaller of the Linux and Windows figures (Q25).*
 - **NuGet IPv6**: the eldrid-specific workaround may or may not be needed.
 
 ## Local models on Windows *(windows-plan; needs revisit)*
@@ -418,7 +445,7 @@ Carried over from windows-plan.md's open questions and not covered above *(wordi
 Raised in the review and decided with the rest *(2026-11-11)*:
 
 - [x] **17. DDEV ports.** Use 80/443 under WSL, or keep 8080/8443 as on the Chromebooks (see
-  "v77–v101: reviewed 2026-11-11, pending owner review")? *Decided 2026-11-11: Decisions, "Q17 DDEV ports".*
+  "v77–v101: reviewed 2026-11-11, owner review done")? *Decided 2026-11-11: Decisions, "Q17 DDEV ports".*
 - [x] **18. `.wslconfig`.** Memory, swap and disk settings for the WSL VM (see the compatibility review's
   Resources row and the Disk item)? *Decided 2026-11-11: Decisions, "Q18 `.wslconfig`".*
 
@@ -456,7 +483,8 @@ details follow from questions 2–6).
 2. **Settle the open questions** in chat (at least 1–7 and 13), recorded in the plan doc. *Done
    2026-11-11 (PR #1 review); Q8 stays open.*
 3. **WSL review of v77–v101** (Claude Code, cloud, read-only): extend the compatibility table. *Done
-   2026-11-11, pending owner review: [v1-wsl-review.md](v1-wsl-review.md).*
+   2026-11-11: [v1-wsl-review.md](v1-wsl-review.md). Owner review done the same day (PR #2 review);
+   Q19–Q34 recorded under Decisions.*
 4. **v1 plan** in `docs/plans/v1-plan.md` (or whatever numbering is chosen) on `plan/v1`.
 5. **Preliminary build** in the cloud on `release/v1`: fork the four scripts, rename, guard, preflight,
    Debian/WSL edits, host script. Lint-clean, "built, not yet confirmed run".
@@ -467,6 +495,7 @@ details follow from questions 2–6).
 
 | Date | Topic | Outcome |
 | --- | --- | --- |
+| 2026-11-11 | Stale items from the review fixed | The nine items in the review's C4 are fixed here, with dated notes on imported text: the compatibility review's Browser opening, Editors and launchers, Android and Resources rows (and the mkcert and `passwd -d` rows' status); "Browser standard", the DDEV ports item and the Disk item; Q18's sparse VHD wording and Q9's `wslview` check; the preflight list (root, `sudo -n true`, WSL 2); the host-script scope (reordered: `.wslconfig` before the distro, the sudoers drop-in after the user exists, mkcert on Windows before setup; usbipd-win moved to a later version); and the v77–v93 flag list. On the last one the review was partly wrong: only install-herdr was missing as a flag; the other five it named are in the list, inside longer items or asides. AGENTS.md's hazards follow (the opener instead of `wslview`; the inotify line). The v77–v101 section's heading now says the owner review is done |
 | 2026-11-11 | PR #2 review: Q19–Q34 decided | The owner accepted every Part C recommendation of the v77–v101 review, with four additions. Q19: the bundle's own opener, calling `rundll32.exe url.dll,FileProtocolHandler` by absolute path after `wslpath -w` for local paths, with `BROWSER` also set; no `wslu`. Q20: launchers in `/usr/local/share/applications`. Q21: the host script writes the sudoers drop-in as root, after the owner has created the distro's user. Q22: `DEV_BUNDLE_ANY_HOST` kept, `DEV_ON_WSL`, WSL 2 required. Q23: Debian check as on the Chromebook, a warning when not 13. Q24: mkcert on Windows with `CAROOT` through `WSLENV`, before setup. Q25: disk helpers take the smaller of the Linux and Windows figures. Q26: `sparseVhd=true` written before the distro is installed, never `--allow-unsafe`. Q27: IPv4 check unchanged in v1. Q28: `DONT_PROMPT_WSL_INSTALL`. Q29: preflight after the guard, with root, `sudo -n true` and WSL 2 added. Q30: Ollama and torch sizing kept. Q31: `devmem` residual renamed. Q32: refused-flag code forked untouched. Q33: nothing in code; observe on d3, `vmIdleTimeout` noted as a possible lever. Q34: one skip line for install-mobile, no usbipd-win in v1, demo text rewritten. Q8 stays open. Next: the stale items fixed, then the v1 plan |
 | 2026-11-11 | WSL review of v77–v101 (step 3 of the sequence) | Written as [v1-wsl-review.md](v1-wsl-review.md) on `plan/v1`, from the v101 code: 78 Part A rows, 157 inventory items (setup 58, test 44, init 23, demo 32). No flag has to join the refused list. Raised for the owner: 16 new open questions (Q19–Q34), among them how links open in the Windows browser now that `wslu` is discontinued, where launchers go since WSLg does not list `~/.local/share/applications`, VS Code's WSL prompt, disk guards reading the VHDX's virtual size, and a second look at sparse VHD; and 9 items in this doc found wrong or stale. Nothing decided; pending owner review, then the v1 plan |
 | 2026-11-11 | PR #1 follow-up: three decisions | Refused flags in groups (Q13): any group, including `install-all`, skips a refused member with a notice, and naming a refused flag directly stops before anything installs. Docker Desktop (Q4): the host script checks its WSL integration for this distro and reports it, changing nothing; setup's preflight is the enforcement. Networking: v1 keeps WSL's default NAT, Windows browsers reach WSL services through localhost forwarding (DDEV at `localhost:8080` / `8443`), and mirrored networking comes with Q8. Brought in line: the host-script scope, the reason for the 22H2 minimum (needed when mirrored networking comes with Q8), the porting map note (install-godot, install-antigravity and install-media stay WSL installs in v1), and step 1 of the sequence marked done |

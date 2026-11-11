@@ -73,14 +73,17 @@ MIT `LICENSE`.
     sandboxes, pipx and venv paths break, and it is slow. It lives in the Linux home.
   - **CRLF:** a script that passed through Windows Git or a Windows editor fails with
     `$'\r': command not found`. `.gitattributes` keeps every text file LF (`*.ps1` CRLF).
-  - **Memory cap:** WSL gets 50% of host RAM by default; inotify watches may be low. The host script
-    sizes `.wslconfig` (about 75% of host RAM, plus swap and sparse VHD); inotify via `sysctl`.
+  - **Memory cap:** WSL gets 50% of host RAM by default. The host script sizes `.wslconfig` (about 75%
+    of host RAM, plus swap, and `sparseVhd=true` written before the distro is installed).
+  - **inotify watches** may be low. The test's check is a WARN, not a FAIL, and its hint names the
+    `sysctl`; no setup or host-script step raises the limit unless a laptop shows it is needed.
   - **Docker Desktop:** its WSL integration conflicts with docker-ce inside the distro. The bundle uses
     docker-ce; setup's preflight stops if the integration is on for this distro. The host script checks
     and reports it, and doesn't change Docker Desktop's settings.
-  - Also: GPU is WSLg's `/dev/dxg` + Mesa D3D12 (no virgl, `renderD128` or sommelier); links open with
-    `wslview` in the Windows default browser; disk freed inside WSL does not return to Windows until the
-    VHDX is compacted.
+  - Also: GPU is WSLg's `/dev/dxg` + Mesa D3D12 (no virgl, `renderD128` or sommelier); links open in
+    the Windows default browser through the bundle's own opener in `~/.local/bin`, which calls Windows
+    by absolute path (no `wslu` / `wslview`); disk freed inside WSL does not return to Windows unless
+    the VHDX is sparse or is compacted.
 
 ## Where you are running
 

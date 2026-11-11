@@ -623,9 +623,11 @@ Numbered after the plan's Q18. Each has a recommendation; none is decided.
    root user, `sudo -n true`, WSL 2 (Q29).
 8. **Host-script scope: "usbipd-win".** Nothing in v1 uses it (Q34b). And "mkcert trust on Windows"
    may need to run before setup, not after (Q24).
-9. **The "Flags added v77–v93" list** omits flags that exist in v101: install-ollama-containers,
-   install-oracle-full, install-gitlab-runner, install-cloudflared, install-vue, and install-herdr
-   (v95, a flag in install-all, listed only as "herdr"). Part A has them all.
+9. **The "Flags added v77–v93" list** names install-herdr (v95, a flag in `install-all`) only as
+   "herdr", in the v94–v101 paragraph. *Corrected 2026-11-11 (PR #2 review): this item first said six
+   flags were missing. That was wrong for five of them. install-ollama-containers, install-oracle-full,
+   install-gitlab-runner, install-cloudflared and install-vue are in the list, inside longer items or
+   italic asides, where they are easy to miss. Part A has all six.*
 
 Confirmed as written: the systemd row (Microsoft documents `systemd` in `wsl.conf` as off unless
 set; the state of Debian's own image could not be checked, so the host script setting it is right
