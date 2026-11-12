@@ -21,9 +21,11 @@ conventions. Most tools install inside WSL as Linux tools, just as on a Chromebo
 published as is. The owner decides what goes in and runs every version on the laptops; the coding agent
 drafts, reviews and fixes the scripts.
 
-**Status: planning; nothing is built.** Decisions for v1 are recorded: open questions 1–7 and 13 were settled on 2026-11-11. Next comes the WSL review of v77–v101, then the v1 plan; the scripts start after the v1 plan.
+**Status: v1 built, not yet confirmed run in WSL.** The five scripts exist on `release/v1`, built in the
+cloud from `docs/plans/v1-plan.md` and checked by lint only. Next comes the first run on d3 (the plan's
+section 3); v1 is done when that run is clean (section 4).
 
-The scripts to come (names decided 2026-11-11, open question 2 in `docs/plans/wsl-plan.md`):
+The scripts (names decided 2026-11-11, open question 2 in `docs/plans/wsl-plan.md`):
 
 | Script | Role |
 |---|---|
@@ -42,9 +44,12 @@ dependencies). A flag added to one script is added to all four, even if some onl
 Run order: **`dev-host-wsl.ps1` on Windows first**, then **init → setup → init → test** inside WSL, as on
 the Chromebooks (first init only writes the secrets template).
 
-What exists now: `docs/plans/wsl-plan.md` (decisions, the WSL compatibility review, open questions),
-`reference/dev-setup-chromebook/` (read-only copy of Chromebook v101, the fork source), lint CI, and an
-MIT `LICENSE`.
+What exists now: the five scripts at the repo root, `CHANGELOG.md`, `README.md` with the flag tables,
+`docs/plans/` (`wsl-plan.md`: decisions, the compatibility review, open questions; `v1-wsl-review.md`;
+`v1-plan.md`: the build spec, the first-run protocol, acceptance), `docs/init-checklist.md`,
+`docs/dev-demo.md` and `docs/wsl-gotchas.md` (the first two forked from the Chromebook bundle's, the third
+new; first-run findings go into it), `reference/dev-setup-chromebook/` (read-only copy of Chromebook
+v101, the fork source), lint CI, and an MIT `LICENSE`.
 
 ## Target environment
 
@@ -88,14 +93,19 @@ MIT `LICENSE`.
 ## Where you are running
 
 Check this before running anything. The host guard at the top of every script will exit on anything that
-isn't **WSL + Debian** (WSL detected by `$WSL_DISTRO_NAME` or `/proc/sys/fs/binfmt_misc/WSLInterop`;
-Debian by `/etc/os-release`), replacing the Chromebook bundle's ChromeOS + Debian check. **A bypass such
+isn't **WSL 2 + Debian** (WSL detected by `$WSL_DISTRO_NAME` or `/proc/sys/fs/binfmt_misc/WSLInterop` or
+`WSLInterop-late`; WSL 2 by `WSL2` in the kernel release; Debian by `/etc/os-release`), replacing the
+Chromebook bundle's ChromeOS + Debian check. **A bypass such
 as `DEV_BUNDLE_ANY_HOST=1` is never used to force it**, in either case below.
 
 **In a cloud sandbox** (Claude Code on the web, Codex cloud, CI): this is not one of the laptops and not
 WSL. Do not run setup, init, test, demo or the host script, from this repo or from `reference/`. Cloud
 work is seeding, static review and preliminary builds: edits, `bash -n`, `shellcheck -S error`, CI. Real
 runs happen in WSL on the laptops; the owner pastes the end of a test run back into the session.
+
+**Nothing from the scripts is executed or sourced in the cloud, including a fragment extracted from
+one.** Logic is checked by reading, `bash -n` and `shellcheck` only. (v1, Nov 11 2026: an extracted
+fragment skipped the host guard and ran setup's body in the sandbox.)
 
 **Locally, inside the Debian WSL distro on one of the laptops** (an agent started in the owner's WSL
 terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any `/mnt/*` path**):
@@ -125,10 +135,24 @@ terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any 
 1. **One version number for the bundle.** Numbering starts at **v1** (based on Chromebook v101). Any
    change to any script bumps **all five** to the same version, including scripts with no code change
    ("version bump only" in the changelog): `dev-setup-wsl.sh`, `dev-init-wsl.sh`, `dev-test-wsl.sh`,
-   `dev-demo-wsl.sh` and `dev-host-wsl.ps1`. Every place the version string appears gets updated. The
-   list of those places and the `grep` that must show only the new number come with the v1 build, once
-   the forked scripts and the host script's version line exist (the Chromebook bundle's list is in
-   `reference/dev-setup-chromebook/AGENTS.md`, rule 1).
+   `dev-demo-wsl.sh` and `dev-host-wsl.ps1`. The version string appears in several places; update every
+   one:
+   - line 2 of each bash script: `# dev-<name>-wsl - Version NN`; line 1 of `dev-host-wsl.ps1`:
+     `# dev-host-wsl - Version NN`
+   - setup: "Setup stage summary (Version NN)", "Setup Version NN complete!", "Setup Version NN complete
+     with failures" and "Starting comprehensive ... (Version NN)..."
+   - test: "Testing ... (Version NN)..." and "Test Version NN complete", and `VERSION=NN` in the retro
+     scaffold fixture (it stands in for demo's `VERSION`)
+   - init: the two "Init Version NN complete" lines
+   - demo: `VERSION=NN`
+   - host: "dev-host-wsl - Version NN" (the banner), "Host script summary (Version NN)" and
+     "dev-host-wsl Version NN complete."
+   - `README.md`: "**Current version: vNN.**"; `CHANGELOG.md`: a `- **vNN**` entry under each of the five
+     sections
+
+   After bumping, `grep -n 'Version [0-9]\+\|^VERSION=' dev-*.sh dev-host-wsl.ps1` must show only the new
+   number (CI checks this, the README line and the five changelog entries). "Based on dev-setup-chromebook
+   v101" in each header and version tags inside comments (`# v1: ...`) are history and do not change.
 2. **CHANGELOG.md** has one section per script (five, including the host script), newest version first.
    Every version gets an entry under every script; a script with no change gets "version bump only".
    Each entry says whether it ports to dev-setup-chromebook (yes / no / n.a.).
@@ -236,9 +260,12 @@ Once the scripts exist, update in the same change:
 
 ## Known open items
 
-Decisions for v1 are recorded: open questions 1–7 and 13 were settled on 2026-11-11. Next comes the WSL review of v77–v101, then the v1 plan; the scripts start after the v1 plan.
+v1 built, not yet confirmed run in WSL. Next: the first run on d3 (`docs/plans/v1-plan.md`, section 3).
+What the build could not confirm from a source is listed in the v1 pull request and marked in the code
+("to confirm on the first run"): the guard's two strings, the preflight's Docker Desktop signs, the opener,
+`df` on the Windows drive, and most of what the host script reads from Windows.
 
 Still open: Q8 (Tailscale and LAN sharing; lean: Tailscale on the Windows host, decided when a version
-ports install-lan) and the step 3 review (WSL review of v77–v101), both in `docs/plans/wsl-plan.md`.
+ports install-lan), in `docs/plans/wsl-plan.md`.
 Nothing there is decided until the owner says so and it is recorded in that doc's Decisions table and
 discussion log.
