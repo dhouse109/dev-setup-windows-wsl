@@ -754,10 +754,10 @@ printf '%s\n' 'Acquire::Retries "3";' 'Acquire::http::Timeout "60";' 'Acquire::h
 stage system
 # 1. System Setup, Base Packages & Headless Dependencies
 echo "Updating system and installing base packages, Python tools, and Puppeteer dependencies..."
-# Public release: 'passwd -d' leaves the Linux user with no password. It is here for ChromeOS's Linux,
-# where sudo asks for none; on any other machine (DEV_BUNDLE_ANY_HOST=1) it would delete a real login
-# password, so it runs on ChromeOS only (DEV_ON_CHROMEOS comes from the host guard above).
-if [ "${DEV_ON_CHROMEOS:-0}" = 1 ]; then sudo passwd -d "$USER"; fi
+# v1: no 'passwd -d' here. The Chromebook script removed the Linux user's password so that sudo asks for
+# none; under WSL the account keeps its password, and sudo is passwordless through the drop-in
+# /etc/sudoers.d/dev-bundle that dev-host-wsl.ps1 wrote (Q7, Q21). The preflight has already checked it
+# with 'sudo -n true'.
 # v99 (Nov 1 2026): abort on a failed update before upgrade; later stages stay unreached.
 apt_get update
 apt_get upgrade -y
@@ -799,7 +799,9 @@ stage ssh
 # 3. SSH Key Generation (Modern Ed25519)
 echo "Generating SSH key..."
 if [ ! -f ~/.ssh/id_ed25519 ]; then
-    ssh-keygen -t ed25519 -C "$USER@chromebook" -N "" -f ~/.ssh/id_ed25519
+    # v1: the key comment names the machine. Under WSL the hostname is the Windows computer name, which
+    # tells the four laptops apart in GitHub's key list (P5); the Chromebook script wrote "$USER@chromebook".
+    ssh-keygen -t ed25519 -C "$USER@$(hostname)" -N "" -f ~/.ssh/id_ed25519
 else
     echo "SSH key already exists, skipping generation."
 fi
@@ -813,14 +815,9 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 apt_get update
 apt_get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo usermod -aG docker $USER
-# v69: GPU access. Crostini hands the container a virgl GPU as /dev/dri/card0 (group video) and
-# /dev/dri/renderD128 (group render, mode 0660). Windowed OpenGL clients open the RENDER node, and
-# the default user is only in 'video', so without this they silently fall back to llvmpipe
-# (software): Godot, Flutter desktop, Android Studio's previews, Chrome's WebGL. Group changes
-# apply to new logins: shut Linux down (right-click Terminal > Shut down Linux) and reopen it.
-for grp in video render; do
-    if getent group "$grp" > /dev/null; then sudo usermod -aG "$grp" "$USER"; fi
-done
+# v1: no video / render groups here. The Chromebook script (v69) added the user to both so that OpenGL
+# clients could open virgl's render node, /dev/dri/renderD128. WSLg's GPU is /dev/dxg (Mesa's D3D12
+# driver): there is no render node and no group to join. Its permissions are checked on the first run.
 
 stage homebrew
 # 5. Homebrew, DDEV, and GitHub CLI
@@ -897,9 +894,10 @@ mkcert -install
 # (The plan put this next to install-drupal's 'ddev config global'; DDEV itself is base, so it is here.)
 DDEV_GCFG="$HOME/.ddev/global_config.yaml"
 ddev_gport() { sed -n "s/^router_$1_port:[[:space:]]*\"\{0,1\}\([0-9]*\)\"\{0,1\}.*/\1/p" "$DDEV_GCFG" 2> /dev/null | head -n 1; }
-if [ "$DEV_ON_CHROMEOS" != 1 ]; then
-    echo "NOTICE: not ChromeOS, so DDEV's router stays on its own ports (80/443 unless you set others)."
-elif ! command -v ddev > /dev/null 2>&1; then
+# v1: this runs on every WSL machine; the Chromebook script ran it on ChromeOS only. The reason here is
+# parity with the Chromebooks (Q17): the same 8080/8443 in the docs, the demos and between laptops. It is
+# not a forwarding limit, as it was on ChromeOS. Ports you set yourself still win.
+if ! command -v ddev > /dev/null 2>&1; then
     echo "NOTICE: ddev is not on PATH, so its router ports were not set (rerun setup)."
 else
     # DDEV writes its defaults into the file on every save (router_http_port: "80", router_https_port: "443";
@@ -910,12 +908,12 @@ else
     if [ "${DDEV_HP_MINE:-8080}" != 8080 ] || [ "${DDEV_SP_MINE:-8443}" != 8443 ]; then
         echo "NOTICE: DDEV's router ports are yours (router_http_port ${DDEV_HP:-80}, router_https_port ${DDEV_SP:-443} in $DDEV_GCFG),"
         echo "        so setup left them: DDEV sites are on http://<site>.ddev.site:${DDEV_HP:-80} and https://<site>.ddev.site:${DDEV_SP:-443}."
-        [ "${DDEV_HP:-80}" = 80 ] || [ "${DDEV_SP:-443}" = 443 ] && echo "        ChromeOS's browser cannot reach 80 or 443 in Linux."
+        [ "${DDEV_HP:-80}" = 80 ] || [ "${DDEV_SP:-443}" = 443 ] && echo "        The bundle's docs and demos assume 8080/8443, as on the Chromebooks."
     elif [ "$DDEV_HP" = 8080 ] && [ "$DDEV_SP" = 8443 ]; then
         echo "DDEV's router: already on 8080/8443 (sites are https://<site>.ddev.site:8443)."
     elif timeout 60 ddev config global --router-http-port=8080 --router-https-port=8443 < /dev/null > /dev/null 2>&1 \
         && [ "$(ddev_gport http)" = 8080 ] && [ "$(ddev_gport https)" = 8443 ]; then
-        echo "DDEV's router moved to 8080/8443 (ChromeOS does not pass 80/443 to Linux): sites are https://<site>.ddev.site:8443."
+        echo "DDEV's router moved to 8080/8443 (the same ports as on the Chromebooks): sites are https://<site>.ddev.site:8443."
         if sudo -n docker ps --format '{{.Names}}' 2> /dev/null | grep -qx ddev-router; then
             echo "        The DDEV router running now keeps its old ports until 'ddev poweroff' (then 'ddev start' your project)."
         fi
@@ -948,15 +946,28 @@ if command -v ddev > /dev/null 2>&1; then
 else
     echo "NOTICE: ddev is not on PATH, so its usage telemetry was not turned off (rerun setup)."
 fi
-# v96: mkcert's CA is trusted in Linux only (mkcert -install above); ChromeOS's browser, which opens Linux's links
-# since v96, has its own certificate store, which Linux can't reach. So *.ddev.site shows "Not secure" there until
-# the CA is imported by hand (Oct 26 2026: https://ddev-test.ddev.site:8443 opened with Chrome's warning).
-if [ "$DEV_ON_CHROMEOS" = 1 ] && [ -f "$(mkcert -CAROOT 2> /dev/null)/rootCA.pem" ]; then
-    echo "To open DDEV's https sites in ChromeOS's browser without a warning, import mkcert's CA there once:"
-    echo "  cp \"\$(mkcert -CAROOT)/rootCA.pem\" ~/ddev-rootCA.pem, then in ChromeOS: Settings > Privacy and security >"
-    echo "  Security > Manage certificates > Authorities > Import (from Linux files), tick \"Trust this certificate for"
-    echo "  identifying websites\", then delete ~/ddev-rootCA.pem. (docs/init-checklist.md, DDEV in ChromeOS's browser)"
-fi
+# v1: one CA for both sides (Q24). dev-host-wsl.ps1 runs 'mkcert -install' on Windows and shares that CA
+# folder into WSL as CAROOT through WSLENV, so 'mkcert -install' above trusts the same CA in Linux and the
+# Windows browser opens *.ddev.site without a warning. Setup writes CAROOT nowhere (P6): it reports the
+# folder mkcert uses, and the test warns when it is not the shared one. The Chromebook script printed how
+# to import the CA into ChromeOS by hand here. A folder under /mnt/ is taken as the Windows one.
+MKCERT_CAROOT=$(mkcert -CAROOT 2> /dev/null || true)
+case "$MKCERT_CAROOT" in
+    /mnt/*)
+        if [ -f "$MKCERT_CAROOT/rootCA.pem" ]; then
+            echo "mkcert: using the CA shared from Windows ($MKCERT_CAROOT), so DDEV's https sites open in the Windows browser without a warning."
+        else
+            echo "NOTICE: mkcert's CA folder is the Windows one ($MKCERT_CAROOT) but it holds no rootCA.pem."
+            echo "        Run dev-host-wsl.ps1 on Windows again (its mkcert step), open a new terminal and rerun setup."
+        fi ;;
+    *)
+        echo "NOTICE: mkcert's CA is this distro's own (${MKCERT_CAROOT:-no CA folder}), not one shared from Windows,"
+        echo "        so the Windows browser will warn on DDEV's https sites. dev-host-wsl.ps1's mkcert step sets it up"
+        echo "        (mkcert -install on Windows, CAROOT shared through WSLENV); then open a NEW terminal, so CAROOT is"
+        echo "        in its environment, and rerun setup."
+        ;;
+esac
+unset MKCERT_CAROOT
 
 stage chrome
 # 6. Google Chrome (Unconditional)
@@ -978,28 +989,121 @@ else
     rm -f "$ASSETS/downloads/google-chrome-stable_current_amd64.deb"
 fi
 
-# v96: links from Linux open in ChromeOS's browser, not in a Linux Google Chrome (Oct 26 2026: Chrome registered
-# itself as Linux's handler for web links, so Devin Desktop's Login opened its sign-in page in a Linux Chrome inside
-# the VM's memory, separate from ChromeOS's browser and its sign-ins, and that Chrome, left running, added to the
-# memory squeeze that froze Devin). 'xdg-settings set default-web-browser' refuses ("$BROWSER is set": ChromeOS sets
-# BROWSER=/usr/bin/garcon-url-handler), and xdg-open checks the MIME registration before $BROWSER anyway; this line
-# worked, tested Oct 26 with https, http://localhost and 127.0.0.1 (ChromeOS passes localhost to Linux), a file in
-# Linux files, and a DDEV site on 8443. Playwright, Selenium, Cypress and Puppeteer start their own browser, so they
-# are unaffected, and Linux Chrome stays installed. Here, after Chrome's install, so this overrides its registration.
+# v1: links from Linux open in the Windows default browser (Q19, Q9, P7). The Chromebook script (v96) made
+# garcon_host_browser.desktop the handler for web links here, so that a sign-in page did not open in a Linux
+# Chrome inside the VM. WSL has no garcon, and the bundle does not use wslu: it writes its own opener,
+# ~/.local/bin/dev-open, which calls Windows by absolute path and so works with the Windows PATH left out of
+# WSL (appendWindowsPath=false). Three pieces: (1) the opener; (2) dev-open.desktop, its handler entry,
+# registered with xdg-mime for the same three types as on the Chromebook (xdg-open checks that registration
+# before $BROWSER); it is a handler, not a launcher, so it stays in ~/.local/share/applications with
+# NoDisplay=true (Q20 moves launchers only); (3) a marked ~/.bashrc block that exports BROWSER, for tools
+# that read only BROWSER, and DONT_PROMPT_WSL_INSTALL=1 (Q28), so VS Code's 'code' does not stop to ask
+# about its Windows build under WSL. Both are exported for the rest of this run too. Playwright, Selenium,
+# Cypress and Puppeteer start their own browser, so they are unaffected, and Linux Chrome stays installed.
+# Here, after Chrome's install, so this overrides its registration. To verify on the first run: xdg-open on
+# Debian 13 honours the handler under WSL, and both routes open the Windows browser.
 # Back to Linux Chrome: xdg-mime default com.google.Chrome.desktop x-scheme-handler/https x-scheme-handler/http text/html
-if [ -f /usr/share/applications/garcon_host_browser.desktop ] && command -v xdg-mime > /dev/null 2>&1; then
+mkdir -p ~/.local/bin ~/.local/share/applications
+cat > "$HOME/.local/bin/dev-open.new" << 'DEVOPEN_EOF'
+#!/bin/bash
+# dev-open - written by dev-setup-wsl; rewritten on every run.
+# Opens one URL or one file on the Windows side, with its default program there: a web link opens in the
+# Windows default browser.
+#   dev-open https://example.com      dev-open ./report.html      dev-open file:///home/me/clip.gif
+# It is the handler behind dev-open.desktop (what xdg-open uses) and the value of BROWSER.
+# A local path that exists, or a file:// URL that names one, is turned into a Windows path first
+# (wslpath -w); anything else is passed on as it is. Windows is called by absolute path (rundll32.exe,
+# found with wslpath, not through PATH), so this works with the Windows PATH left out of WSL.
+# It never falls back to a Linux browser: when Windows cannot be reached it says why and exits non-zero.
+# The link itself is never printed: a sign-in link can carry a token.
+if [ "$#" -ne 1 ] || [ -z "$1" ]; then
+    echo "usage: dev-open URL-or-FILE" >&2
+    exit 2
+fi
+if ! command -v wslpath > /dev/null 2>&1; then
+    echo "dev-open: wslpath is missing (is this WSL?), so nothing was opened." >&2
+    exit 3
+fi
+target=$1
+case "$target" in
+    file://*)
+        path=${target#file://}; path=${path#localhost}
+        path=$(printf '%b' "${path//%/\\x}")   # %20 and the like
+        if [ -e "$path" ]; then target=$(wslpath -w "$path"); fi ;;
+    *://*|mailto:*) ;;
+    *)  if [ -e "$target" ]; then target=$(wslpath -w "$target"); fi ;;
+esac
+if [ -z "$target" ]; then
+    echo "dev-open: wslpath could not turn that path into a Windows one, so nothing was opened." >&2
+    exit 3
+fi
+rundll=$(wslpath -u 'C:\Windows\System32\rundll32.exe' 2> /dev/null)
+if [ -z "$rundll" ] || [ ! -e "$rundll" ]; then
+    echo "dev-open: rundll32.exe was not found (${rundll:-wslpath gave no path}), so nothing was opened." >&2
+    echo "  Is the Windows drive mounted in this distro?" >&2
+    exit 3
+fi
+"$rundll" url.dll,FileProtocolHandler "$target" 2> /dev/null
+rc=$?
+case "$rc" in
+    0) exit 0 ;;
+    126|127)
+        echo "dev-open: Linux could not start a Windows program, so nothing was opened." >&2
+        echo "  Windows interop looks off: check [interop] enabled in /etc/wsl.conf (its default is true)," >&2
+        echo "  then from Windows:  wsl --shutdown" >&2
+        exit 3 ;;
+    *)  echo "dev-open: rundll32.exe returned $rc; the link may not have opened." >&2
+        exit "$rc" ;;
+esac
+DEVOPEN_EOF
+chmod +x "$HOME/.local/bin/dev-open.new"
+mv -f "$HOME/.local/bin/dev-open.new" "$HOME/.local/bin/dev-open"
+cat > "$HOME/.local/share/applications/dev-open.desktop.new" << EOF
+[Desktop Entry]
+Type=Application
+Name=Windows default browser (dev-open)
+Comment=Opens web links from Linux in the Windows default browser
+Exec=$HOME/.local/bin/dev-open %u
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/https;x-scheme-handler/http;text/html;
+EOF
+mv -f "$HOME/.local/share/applications/dev-open.desktop.new" "$HOME/.local/share/applications/dev-open.desktop"
+# The ~/.bashrc block, written in place as the Homebrew block is (replaced where it stands, appended once).
+WSL_BLOCK_FILE=$(mktemp)
+cat > "$WSL_BLOCK_FILE" << 'EOF'
+# >>> dev-setup wsl >>>
+# Written by dev-setup; this block is replaced on each run. BROWSER: tools that read only BROWSER open
+# their links in the Windows default browser, through the bundle's opener (xdg-open uses dev-open.desktop).
+# DONT_PROMPT_WSL_INSTALL: VS Code's 'code' starts inside WSL without asking about its Windows build.
+export BROWSER="$HOME/.local/bin/dev-open"
+export DONT_PROMPT_WSL_INSTALL=1
+# <<< dev-setup wsl <<<
+EOF
+awk -v blockfile="$WSL_BLOCK_FILE" '
+    function emit() { if (!done) { while ((getline l < blockfile) > 0) print l; close(blockfile); done = 1 } }
+    /^# >>> dev-setup wsl >>>$/ { emit(); skip = 1; next }
+    skip && /^# <<< dev-setup wsl <<<$/ { skip = 0; next }
+    skip { next }
+    { print }
+    END { if (!done) { while ((getline l < blockfile) > 0) print l } }
+' ~/.bashrc > ~/.bashrc.dev-setup.tmp && cat ~/.bashrc.dev-setup.tmp > ~/.bashrc
+rm -f ~/.bashrc.dev-setup.tmp "$WSL_BLOCK_FILE"
+export BROWSER="$HOME/.local/bin/dev-open"
+export DONT_PROMPT_WSL_INSTALL=1
+if command -v xdg-mime > /dev/null 2>&1; then
     LINK_TYPES=(x-scheme-handler/https x-scheme-handler/http text/html)
     LINK_HAD=()
     for LINK_T in "${LINK_TYPES[@]}"; do LINK_HAD+=("$(xdg-mime query default "$LINK_T" 2> /dev/null)"); done
-    if [ "${LINK_HAD[*]}" = "garcon_host_browser.desktop garcon_host_browser.desktop garcon_host_browser.desktop" ]; then
-        echo "Links from Linux: already open in ChromeOS's browser (garcon_host_browser.desktop)."
-    elif xdg-mime default garcon_host_browser.desktop "${LINK_TYPES[@]}"; then
-        echo "Links from Linux now open in ChromeOS's browser (was: ${LINK_HAD[0]:-none}; ~/.config/mimeapps.list)."
+    if [ "${LINK_HAD[*]}" = "dev-open.desktop dev-open.desktop dev-open.desktop" ]; then
+        echo "Links from Linux: already open in the Windows default browser (dev-open.desktop, ~/.local/bin/dev-open)."
+    elif xdg-mime default dev-open.desktop "${LINK_TYPES[@]}"; then
+        echo "Links from Linux now open in the Windows default browser (was: ${LINK_HAD[0]:-none}; ~/.config/mimeapps.list)."
     else
-        echo "NOTICE: xdg-mime could not make ChromeOS's browser the handler for web links."
+        echo "NOTICE: xdg-mime could not make dev-open the handler for web links (BROWSER still points at it)."
     fi
 else
-    echo "NOTICE: no garcon_host_browser.desktop (not ChromeOS?), so Linux's handler for web links is unchanged."
+    echo "NOTICE: no xdg-mime, so Linux's handler for web links is unchanged (BROWSER still points at dev-open)."
 fi
 
 stage devmem
@@ -1011,15 +1115,18 @@ stage devmem
 # (shared pages counted once; RSS where a process can't be read), kernel and shmem from /proc/meminfo, the rest of
 # "used" as ChromeOS's share (an estimate), the top programs, the bundle's containers and Ollama's loaded models,
 # and a verdict. Only procps, awk and (when there) docker and ollama.
+# v1 (Q31): under WSL nothing takes memory back the way ChromeOS's balloon did: the VM has up to .wslconfig's
+# memory ceiling. So the residual is labelled "not accounted for (estimate)", the "ChromeOS has taken back"
+# verdict is gone, and the Linux Chrome verdict says links open in the Windows browser. The rest is as v96.
 mkdir -p ~/.local/bin
 cat > "$HOME/.local/bin/devmem.new" << 'DEVMEM_EOF'
 #!/bin/bash
-# devmem: what is using Linux's memory, how much ChromeOS has taken back, and what to close (dev-setup v96).
+# devmem: what is using Linux's memory, what is not accounted for, and what to close (dev-setup v96).
 # Written by dev-setup and rewritten on every run: copy it before editing.
 #   devmem                  the full report: Memory, Where "used" is, Top programs, Bundle services, Verdict
 #   devmem --brief          the memory line and the verdict only
 #   devmem --watch [SECS]   the full report, refreshed in place every SECS seconds (default 5) until Ctrl-C
-# "Taken back by ChromeOS" is an estimate: what "used" holds beyond Linux's processes, kernel and shared memory.
+# "Not accounted for" is an estimate: what "used" holds beyond Linux's processes, kernel and shared memory.
 export LC_ALL=C
 usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; }
 # HEAVY: the containers that are one-at-a-time in devsvc (and mssql / oracle): NAME|COMMAND THAT STOPS IT
@@ -1064,6 +1171,7 @@ collect() {   # sets the figures every section uses (KB)
     PROC_KB=$(awk -F'\t' '{ s += $2 } END { print s + 0 }' <<< "$PROCS")
     N_PSS=$(awk -F'\t' '$3 == "pss"' <<< "$PROCS" | grep -c .)
     N_RSS=$(awk -F'\t' '$3 == "rss"' <<< "$PROCS" | grep -c .)
+    # v1: TAKEN keeps its Chromebook name; under WSL it is only the residual, "not accounted for" (Q31).
     TAKEN=$((USED - PROC_KB - KERNEL - SHMEM)); [ "$TAKEN" -lt 0 ] && TAKEN=0
     # Linux's Google Chrome, by its install path (Playwright's and Puppeteer's browsers are called chrome too)
     LINUX_CHROME=$(awk -F'\t' 'index($5, "/opt/google/chrome/") == 1 { s += $2; n++ } END { if (n) print s }' <<< "$PROCS")
@@ -1090,9 +1198,9 @@ memory_line() {
 
 verdict() {
     local out=() h
-    [ "$TAKEN" -gt $((1536 * 1024)) ] && out+=("ChromeOS has taken back $(fmt "$TAKEN"): close ChromeOS tabs or Android apps (Search + Esc shows them).")
+    # v1: no verdict on the residual (Q31): the Chromebook's "ChromeOS has taken back ..." has no WSL counterpart.
     [ "$AVAIL" -lt $((1024 * 1024)) ] && out+=("Less than 1 GB available ($(fmt "$AVAIL")): close something before starting anything large.")
-    [ -n "$LINUX_CHROME" ] && out+=("Linux's Google Chrome is running ($(fmt "$LINUX_CHROME")): links open in ChromeOS's browser since v96, so it can usually be closed.")
+    [ -n "$LINUX_CHROME" ] && out+=("Linux's Google Chrome is running ($(fmt "$LINUX_CHROME")): links open in the Windows browser, so it can usually be closed.")
     for h in "${HEAVY_UP[@]}"; do out+=("A heavy engine or database server is running: ${h%%|*} (stop it with '${h#*|}')."); done
     echo "Verdict:"
     if [ ${#out[@]} -eq 0 ]; then
@@ -1114,7 +1222,7 @@ report() {
     printf '  %-34s %9s  (%s)\n' "Linux processes" "$(fmt "$PROC_KB")" "$how"
     printf '  %-34s %9s  (Slab + KernelStack + PageTables)\n' "kernel" "$(fmt "$KERNEL")"
     printf '  %-34s %9s  (Shmem)\n' "shared memory" "$(fmt "$SHMEM")"
-    printf '  %-34s %9s  (used minus the three above)\n' "taken back by ChromeOS (estimate)" "$(fmt "$TAKEN")"
+    printf '  %-34s %9s  (used minus the three above)\n' "not accounted for (estimate)" "$(fmt "$TAKEN")"
     echo
     echo "Top programs by memory:"
     awk -F'\t' 'NF >= 4 { s[$4] += $2; n[$4]++ } END { for (p in s) printf "%d\t%s\t%d\n", s[p], p, n[p] }' <<< "$PROCS" \
@@ -1153,7 +1261,7 @@ esac
 DEVMEM_EOF
 chmod +x "$HOME/.local/bin/devmem.new"
 mv -f "$HOME/.local/bin/devmem.new" "$HOME/.local/bin/devmem"
-echo "Wrote ~/.local/bin/devmem (what is using memory, what ChromeOS has taken back, what to close)."
+echo "Wrote ~/.local/bin/devmem (what is using memory, what is not accounted for, what to close)."
 
 stage devclean
 # 8. devclean, a disk cleanup (v96)
@@ -1203,6 +1311,8 @@ cat > "$HOME/.local/bin/devclean.new" << 'DEVCLEAN_EOF'
 #   browser profiles           Linux Chrome's bookmarks, sign-ins and settings: only its cache folders are cleared
 #   ~/.config/nvm              the Node versions nvm installed
 #   ~/.local/share/uv          uv's tool environments (aider) and Pythons: only uv's cache is cleared
+# On WSL: space freed here is free inside Linux at once. Windows gets it back by itself only when the distro's
+# disk (its VHDX) is sparse; otherwise after the disk is compacted from Windows (docs/wsl-gotchas.md).
 export LC_ALL=C
 usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; }
 RUN=0; IMAGES=0; WHERE=0
@@ -1738,6 +1848,8 @@ fi
 AFTER=$(free_bytes)
 echo
 echo "Free space: $(human "$BEFORE") before, $(human "$AFTER") after (freed $(human $(( AFTER > BEFORE ? AFTER - BEFORE : 0 ))))."
+# v1 (Q26): the one WSL note. df here reads the virtual disk; what Windows sees is the VHDX file.
+echo "On WSL: Windows gets this space back when the distro's disk is sparse, otherwise after compacting it (docs/wsl-gotchas.md)."
 exit 0
 DEVCLEAN_EOF
 chmod +x "$HOME/.local/bin/devclean.new"
@@ -1870,14 +1982,39 @@ install_jdk_and_java_home() {
 # 10 GB, which on a 25 GB disk with 12 GB free refused SQL Server and Oracle without saying so where you
 # would look. 15% of 25 GB is about 4 GB; on an 80 GB disk the cap (10) applies as before. The DEV_*_MIN_FREE_GB
 # variables still override it.
+# v1 (Q25, P8): df inside WSL reads the distro's virtual disk, whose size is a ceiling and not what the
+# Windows drive under it has left. So both guards also read the Windows drive that holds the distro's disk
+# (its VHDX) and use the smaller figure. Where the VHDX is cannot be seen from inside WSL: the drive is
+# /mnt/c unless DEV_WSL_HOST_DRIVE names another (a drive letter, or its mount point). If that is not a
+# mount, the Linux figure is used alone and setup says so here, once. To confirm on the first run: df on
+# that mount gives a usable figure (a size of 0 counts as unreadable).
+WSL_HOST_MOUNT=${DEV_WSL_HOST_DRIVE:-/mnt/c}
+case "$WSL_HOST_MOUNT" in [A-Za-z]|[A-Za-z]:) WSL_HOST_MOUNT=${WSL_HOST_MOUNT%:}; WSL_HOST_MOUNT="/mnt/${WSL_HOST_MOUNT,,}" ;; esac
+if ! mountpoint -q "$WSL_HOST_MOUNT" 2> /dev/null; then
+    echo "NOTICE: $WSL_HOST_MOUNT is not a mounted Windows drive, so the disk guards use the Linux disk's figures alone."
+    echo "        DEV_WSL_HOST_DRIVE=<letter> names the Windows drive that holds this distro's disk."
+    WSL_HOST_MOUNT=''
+fi
+wsl_host_df_kb() {   # wsl_host_df_kb COLUMN (2 = size, 4 = available), in kB; prints nothing when it can't be read
+    [ -n "$WSL_HOST_MOUNT" ] || return 0
+    df -Pk "$WSL_HOST_MOUNT" 2> /dev/null | awk -v c="$1" 'NR == 2 && $2 ~ /^[0-9]+$/ && $2 > 0 && $c ~ /^[0-9]+$/ {print $c}'
+}
 disk_margin_gb() {   # disk_margin_gb CAP
-    local total pct
+    local total pct host
     total=$(df -Pk / | awk 'NR == 2 {print int($2 / 1024 / 1024)}')
+    host=$(wsl_host_df_kb 2)
+    if [ -n "$host" ] && [ $((host / 1024 / 1024)) -lt "${total:-0}" ]; then total=$((host / 1024 / 1024)); fi
     pct=$(( ${total:-0} * 15 / 100 ))
     [ "$pct" -ge 1 ] || pct=1
     [ "$pct" -lt "$1" ] && echo "$pct" || echo "$1"
 }
-disk_free_gb() { df -Pk / | awk 'NR == 2 {print int($4 / 1024 / 1024)}'; }
+disk_free_gb() {
+    local free host
+    free=$(df -Pk / | awk 'NR == 2 {print int($4 / 1024 / 1024)}')
+    host=$(wsl_host_df_kb 4)
+    if [ -n "$host" ] && [ $((host / 1024 / 1024)) -lt "${free:-0}" ]; then free=$((host / 1024 / 1024)); fi
+    echo "${free:-0}"
+}
 
 # v77: shared by install-ollama, install-gemma and install-models. The systemd unit normally has the
 # server up already (give a just-restarted one a few seconds); without systemd, start it in the
@@ -2623,6 +2760,8 @@ if [[ "$FLAGS" =~ " install-vscode " ]]; then
     rm -f "$KEY_TMP"
     apt_get update
     apt_get install -y code
+    # v1 (Q28): under WSL 'code' stops to ask about its Windows build unless DONT_PROMPT_WSL_INSTALL is set.
+    # Stage chrome exports it for this run and writes it into the ~/.bashrc block "dev-setup wsl".
 else
     echo "Skipping VS Code. (Run with 'install-vscode' flag to enable)"
 fi
@@ -5877,8 +6016,10 @@ ui() {
     have_lite || { echo "No lldap container: run dev-setup with install-ldap." >&2; exit 1; }
     lite_up || { echo "lldap is stopped: 'ldap up' first." >&2; exit 1; }
     echo "$u   (log in as admin: 'ldap passwords')"
-    if [ -x /opt/google/cros-containers/bin/garcon-url-handler ]; then
-        /opt/google/cros-containers/bin/garcon-url-handler "$u" > /dev/null 2>&1 &
+    # v1: the bundle's opener (Q19: the Windows default browser), else xdg-open. The Chromebook script
+    # called garcon-url-handler here.
+    if [ -x "$HOME/.local/bin/dev-open" ]; then
+        "$HOME/.local/bin/dev-open" "$u" > /dev/null 2>&1 &
     elif command -v xdg-open > /dev/null 2>&1; then
         xdg-open "$u" > /dev/null 2>&1 &
     fi
@@ -8110,6 +8251,9 @@ if [[ "$FLAGS" =~ " install-models " ]]; then
             continue
         fi
         free_kb=$(df -Pk "$MODEL_STORE" | awk 'NR == 2 {print $4}')
+        # v1 (Q25, S59): the smaller of the model store's figure and the Windows drive's, as in disk_free_gb.
+        host_kb=$(wsl_host_df_kb 4)
+        if [ -n "$host_kb" ] && [ "$host_kb" -lt "${free_kb:-0}" ]; then free_kb=$host_kb; fi
         need_b=$(model_bytes "$m")
         [[ "$need_b" =~ ^[0-9]+$ ]] || need_b=0
         left_gb=$(( (free_kb * 1024 - need_b) / 1024 / 1024 / 1024 ))
@@ -13352,8 +13496,10 @@ echo "Setup itself never reads your tokens except HF_TOKEN for the Gemma login (
 echo "password you chose for install-db-server / install-ldap, and the LAN_* settings); until step b the test script reports"
 echo "every login as a WARN, even with secrets.env filled in."
 echo "IMPORTANT:"
-echo "1. Restart your terminal or run 'newgrp docker' for Docker permissions. For GPU acceleration (render group),"
-echo "   shut Linux down once: right-click the Terminal icon > Shut down Linux, then reopen Terminal."
+# v1: no GPU sentence (setup adds no render group under WSL: WSLg's GPU is /dev/dxg). The docker group needs
+# a new login: a new terminal, or the distro restarted from Windows.
+echo "1. For Docker without sudo (the docker group), open a new terminal or run 'newgrp docker'. If 'docker ps'"
+echo "   still asks for permission, restart the distro from Windows: wsl --terminate ${WSL_DISTRO_NAME:-<distro>}"
 # v92: the list names only what this run's flags set up (v91 listed every stack whatever the flags).
 PATH_NOTES=(pipx)
 path_note() { local f; for f in "${@:2}"; do if [[ "$FLAGS" == *" $f "* ]]; then PATH_NOTES+=("$1"); return; fi; done; }
