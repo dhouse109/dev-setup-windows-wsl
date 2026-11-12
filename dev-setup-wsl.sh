@@ -2844,14 +2844,17 @@ print(json.dumps({"downloadUrl": r["downloadUrl"], "version": r.get("version", "
         echo "================================================================="
     fi
 
-    # v66: ChromeOS launcher entry. The app drawer lists what has a .desktop file under
-    # /usr/share/applications or ~/.local/share/applications; an AppImage dropped into
-    # ~/.local/bin has neither, which is why Cursor was missing. Exec is an absolute path because
-    # the launcher starts apps without your ~/.bashrc PATH. The icon comes out of the AppImage
-    # ('--appimage-extract' unpacks without FUSE); everything here is best effort, and Cursor
-    # still gets an entry (with a generic icon) if no icon can be found.
+    # v1: Start menu entry (Q20). WSLg lists what has a .desktop file under /usr/share/applications,
+    # /usr/local/share/applications, snap's folder or Flatpak's exports, and not ~/.local/share/applications,
+    # where the Chromebook script (v66) wrote this entry for the ChromeOS launcher. So the entry goes to
+    # /usr/local/share/applications with 'sudo install', same file name, and its icon to
+    # /usr/local/share/pixmaps (P9: whether WSLg reads an icon from a home directory is unconfirmed). An entry
+    # in a system folder that points into one user's home is accepted: the distro has one user. As in v66: an
+    # AppImage in ~/.local/bin has no entry of its own; Exec is an absolute path because the menu starts apps
+    # without your ~/.bashrc PATH; the icon comes out of the AppImage ('--appimage-extract' unpacks without
+    # FUSE); everything here is best effort, and Cursor still gets an entry (with a generic icon) if no icon
+    # can be found.
     if [ -x "$HOME/.local/bin/cursor" ]; then
-        mkdir -p ~/.local/share/applications ~/.local/share/icons
         CUR_TMP=$(mktemp -d)
         (
             cd "$CUR_TMP" || exit 0
@@ -2862,12 +2865,13 @@ print(json.dumps({"downloadUrl": r["downloadUrl"], "version": r.get("version", "
         # Largest PNG found = highest resolution.
         CUR_ICON=$(find "$CUR_TMP" -type f -name '*.png' -printf '%s %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d' ' -f2- || true)
         if [ -n "$CUR_ICON" ] && [ -s "$CUR_ICON" ]; then
-            cp "$CUR_ICON" ~/.local/share/icons/cursor.png
+            sudo install -D -m 644 "$CUR_ICON" /usr/local/share/pixmaps/cursor.png
         fi
         rm -rf "$CUR_TMP"
         CUR_ICON_LINE="Icon=text-editor"
-        if [ -s ~/.local/share/icons/cursor.png ]; then CUR_ICON_LINE="Icon=$HOME/.local/share/icons/cursor.png"; fi
-        cat > ~/.local/share/applications/cursor.desktop << EOF
+        if [ -s /usr/local/share/pixmaps/cursor.png ]; then CUR_ICON_LINE="Icon=/usr/local/share/pixmaps/cursor.png"; fi
+        CUR_DESKTOP=$(mktemp)
+        cat > "$CUR_DESKTOP" << EOF
 [Desktop Entry]
 Type=Application
 Name=Cursor
@@ -2879,7 +2883,9 @@ Categories=Development;IDE;TextEditor;
 StartupWMClass=Cursor
 MimeType=text/plain;inode/directory;
 EOF
-        echo "Added Cursor to the ChromeOS launcher (~/.local/share/applications/cursor.desktop). It can take a minute to appear."
+        sudo install -D -m 644 "$CUR_DESKTOP" /usr/local/share/applications/cursor.desktop
+        rm -f "$CUR_DESKTOP"
+        echo "Added Cursor to the Windows Start menu (/usr/local/share/applications/cursor.desktop). It can take a minute to appear."
     fi
 else
     echo "Skipping Cursor. (Run with 'install-cursor' flag to enable)"
@@ -2917,6 +2923,13 @@ if [[ "$FLAGS" =~ " install-windsurf " ]]; then
     # icon and the terminal run the wrapper below. The freezes that came back later were memory, not X11 (devmem,
     # docs/crostini-gotchas.md). No extension is installed or removed here (CodeLLDB's Linux add-on is a manual
     # install with --profile, in the init checklist).
+    # v1: under WSLg the wrapper keeps --ozone-platform=x11 and also sets DONT_PROMPT_WSL_INSTALL=1 (Q28: the
+    # VS Code-based launcher script may carry VS Code's question about its Windows build; checked on the first
+    # run). The "Devin (X11)" entry goes to /usr/local/share/applications (Q20: WSLg does not list
+    # ~/.local/share/applications). The Chromebook step that hid the stock entry with a NoDisplay=true copy in
+    # the user folder is gone: it cannot hide an entry WSLg reads from /usr/share/applications. So both
+    # "Devin" and "Devin (X11)" show in the Start menu, pending the first-run check of whether the stock one
+    # works under WSLg. The URL-handler entry stays in the user folder: it is for xdg-open, not the menu.
     if [ -x /usr/bin/devin-desktop ]; then
         mkdir -p ~/.local/bin ~/.local/share/applications
         DEVIN_WRAP="$HOME/.local/bin/devin-desktop"
@@ -2927,6 +2940,8 @@ if [[ "$FLAGS" =~ " install-windsurf " ]]; then
                 '# on every run. ChromeOS'"'"'s Wayland froze or closed its window (Oct 26 2026); --ozone-platform=x11 runs it on' \
                 '# XWayland. /usr/bin/devin-desktop by absolute path, so this never calls itself; CLI-only calls' \
                 '# (--install-extension, --list-extensions, --version) ignore the flag.' \
+                '# v1 (WSL): DONT_PROMPT_WSL_INSTALL=1, so the launcher script does not stop to ask about a Windows build.' \
+                'export DONT_PROMPT_WSL_INSTALL=1' \
                 'exec /usr/bin/devin-desktop --ozone-platform=x11 "$@"' > "$HOME/.local/bin/$DEVIN_W.new"
             chmod +x "$HOME/.local/bin/$DEVIN_W.new" && mv -f "$HOME/.local/bin/$DEVIN_W.new" "$HOME/.local/bin/$DEVIN_W"
         done
@@ -2946,13 +2961,9 @@ if [[ "$FLAGS" =~ " install-windsurf " ]]; then
                     if (rest ~ /^"/) { sub(/^"[^"]*"/, "", rest) } else { sub(/^[^ ]*/, "", rest) }
                     print "Exec=" wrap rest; next }
                 { print }' "$DEVIN_STOCK" > "$DEVIN_APPS/devin-desktop-x11.desktop.new" \
-                && mv -f "$DEVIN_APPS/devin-desktop-x11.desktop.new" "$DEVIN_APPS/devin-desktop-x11.desktop"
-            # The stock entry, hidden: the same file plus NoDisplay=true in its main group. If the launcher ignores
-            # this override as it ignored an Exec= change, the stock icon simply stays (the hand check tells).
-            awk '/^\[/ { main = ($0 == "[Desktop Entry]") } main && /^NoDisplay=/ { next }
-                 { print } $0 == "[Desktop Entry]" { print "NoDisplay=true" }' "$DEVIN_STOCK" > "$DEVIN_APPS/devin-desktop.desktop.new" \
-                && mv -f "$DEVIN_APPS/devin-desktop.desktop.new" "$DEVIN_APPS/devin-desktop.desktop"
-            echo "Added Devin (X11) to the ChromeOS launcher ($DEVIN_APPS/devin-desktop-x11.desktop) and hid the stock icon."
+                && sudo install -D -m 644 "$DEVIN_APPS/devin-desktop-x11.desktop.new" /usr/local/share/applications/devin-desktop-x11.desktop
+            rm -f "$DEVIN_APPS/devin-desktop-x11.desktop.new"
+            echo "Added Devin (X11) to the Windows Start menu (/usr/local/share/applications/devin-desktop-x11.desktop); the stock 'Devin' entry shows there too."
         else
             echo "NOTICE: no $DEVIN_STOCK, so the Devin (X11) launcher entry was not made; 'devin-desktop' in a terminal still runs on X11."
         fi
@@ -2969,8 +2980,8 @@ if [[ "$FLAGS" =~ " install-windsurf " ]]; then
                 && mv -f "$DEVIN_APPS/devin-desktop-url-handler.desktop.new" "$DEVIN_APPS/devin-desktop-url-handler.desktop"
         fi
         command -v update-desktop-database > /dev/null 2>&1 && update-desktop-database "$DEVIN_APPS" > /dev/null 2>&1 || true
-        echo "Devin Desktop: open 'Devin (X11)' from the launcher (machines set up before v96: shut Linux down once so it"
-        echo "               appears); 'devin-desktop' in a terminal runs it on X11 too ($DEVIN_WRAP)."
+        echo "Devin Desktop: open 'Devin (X11)' from the Start menu (if it is not there yet: 'wsl --shutdown' from Windows,"
+        echo "               then open Debian again); 'devin-desktop' in a terminal runs it on X11 too ($DEVIN_WRAP)."
     else
         echo "NOTICE: /usr/bin/devin-desktop is missing (the source installed windsurf only), so no X11 launcher or wrapper was made."
     fi
@@ -3158,7 +3169,7 @@ if [[ "$FLAGS" =~ " install-lazarus " ]]; then
 
     # lazmode: switches between the builds below (a file copy, seconds) and rebuilds them. Setup builds through
     # it too, so the build steps live in one place. Its build logs go to assets/logs.
-    mkdir -p ~/.local/bin ~/.local/share/applications
+    mkdir -p ~/.local/bin
     cat > "$HOME/.local/bin/lazmode.new" << 'LAZMODE_EOF'
 #!/bin/bash
 # lazmode: the Lazarus IDE of dev-setup's install-lazarus (v94): Qt5 builds in two profiles, light (~/.lazarus,
@@ -3184,7 +3195,7 @@ if [[ "$FLAGS" =~ " install-lazarus " ]]; then
 LOGDIR="@LOGDIR@"
 LIGHT="$HOME/.lazarus"
 DARK="$HOME/.lazarus-dark"
-DARK_DESKTOP="$HOME/.local/share/applications/lazarus-dark.desktop"
+DARK_DESKTOP="/usr/local/share/applications/lazarus-dark.desktop"   # v1: where WSLg's Start menu looks (Q20)
 QT5CT_CONF="$HOME/.config/qt5ct/qt5ct.conf"
 
 die() { echo "lazmode: $*" >&2; exit 1; }
@@ -4116,17 +4127,23 @@ LAZMODE_EOF
     # The dark launcher, made from the system one so it keeps its icon and categories; the stock launcher stays
     # the light one. A .desktop file does not expand ~ or $HOME, so the path is written out. Localized names and
     # desktop actions are dropped: they would still say "Lazarus" or start the light profile.
+    # v1: written to a temporary file and installed into /usr/local/share/applications, where WSLg's Start
+    # menu looks (Q20); the Chromebook script wrote it to ~/.local/share/applications. lazmode reads the same
+    # path (DARK_DESKTOP above).
     LAZ_DARK_EXEC="Exec=env QT_QPA_PLATFORMTHEME=qt5ct startlazarus --pcp=$HOME/.lazarus-dark %f"
+    LAZ_DARK_TMP=$(mktemp)
     if [ -f /usr/share/applications/lazarus.desktop ]; then
         sed -e '/^\[Desktop Action/,$d' -e '/^Actions=/d' -e '/^Name\[/d' -e '/^TryExec=/d' \
             -e 's/^Name=.*/Name=Lazarus (Dark)/' -e "s|^Exec=.*|$LAZ_DARK_EXEC|" \
-            /usr/share/applications/lazarus.desktop > ~/.local/share/applications/lazarus-dark.desktop
+            /usr/share/applications/lazarus.desktop > "$LAZ_DARK_TMP"
     else
         printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Lazarus (Dark)' 'Comment=Lazarus IDE, dark profile' \
             "$LAZ_DARK_EXEC" 'Icon=lazarus' 'Terminal=false' 'Categories=Development;IDE;' \
-            > ~/.local/share/applications/lazarus-dark.desktop
+            > "$LAZ_DARK_TMP"
     fi
-    echo "Added Lazarus (Dark) to the ChromeOS launcher (~/.local/share/applications/lazarus-dark.desktop)."
+    sudo install -D -m 644 "$LAZ_DARK_TMP" /usr/local/share/applications/lazarus-dark.desktop
+    rm -f "$LAZ_DARK_TMP"
+    echo "Added Lazarus (Dark) to the Windows Start menu (/usr/local/share/applications/lazarus-dark.desktop)."
 
     # qt5ct, which the dark launcher turns on: Fusion with qt5ct's "darker" palette, so it looks right on first
     # start. Key names as qt5ct reads them ([Appearance] style / custom_palette / color_scheme_path). A config
@@ -4176,7 +4193,7 @@ LAZMODE_EOF
             done
         fi
     fi
-    echo "Lazarus: 'Lazarus' (light) and 'Lazarus (Dark)' in the launcher; 'lazmode status', 'lazmode dock on|off'."
+    echo "Lazarus: 'Lazarus' (light) and 'Lazarus (Dark)' in the Start menu; 'lazmode status', 'lazmode dock on|off'."
 else
     echo "Skipping Lazarus 4.8. (Run with 'install-lazarus' flag to enable)"
 fi
@@ -4255,7 +4272,7 @@ if [[ "$FLAGS" =~ " install-godot " ]] || [[ "$FLAGS" =~ " install-godot-templat
             if [ -d "$old" ] && [ "$old" != "$GODOT_DIR" ]; then rm -rf "$old"; fi
         done
 
-        mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons
+        mkdir -p ~/.local/bin
         godot_launcher() {   # godot_launcher NAME BINARY
             cat > "$HOME/.local/bin/$1" << EOF
 #!/bin/sh
@@ -4277,24 +4294,31 @@ EOF
         godot_launcher godot standard/godot.x86_64
         godot_launcher godot-mono mono/godot-mono.x86_64
 
-        # Launcher icon and ChromeOS app-drawer entries (best effort: the editors work without them).
-        curl -fsSL "https://raw.githubusercontent.com/godotengine/godot/$GODOT_TAG/main/app_icon.png" -o ~/.local/share/icons/godot.png || true
+        # v1: launcher icon and Start menu entries (best effort: the editors work without them). The entries go
+        # to /usr/local/share/applications, where WSLg's Start menu looks, and the icon to
+        # /usr/local/share/pixmaps (Q20, P9); the Chromebook script wrote both under ~/.local/share.
+        GODOT_TMP=$(mktemp -d)
+        if curl -fsSL "https://raw.githubusercontent.com/godotengine/godot/$GODOT_TAG/main/app_icon.png" -o "$GODOT_TMP/godot.png"; then
+            sudo install -D -m 644 "$GODOT_TMP/godot.png" /usr/local/share/pixmaps/godot.png
+        fi
         for entry in "godot|Godot Engine|godot" "godot-mono|Godot Engine (.NET)|godot-mono"; do
             IFS='|' read -r d_id d_name d_cmd <<< "$entry"
-            cat > "$HOME/.local/share/applications/$d_id.desktop" << EOF
+            cat > "$GODOT_TMP/$d_id.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=$d_name
-Comment=2D and 3D game engine (OpenGL / Compatibility renderer on Crostini)
+Comment=2D and 3D game engine (OpenGL / Compatibility renderer)
 Exec=$HOME/.local/bin/$d_cmd --project-manager
-Icon=$HOME/.local/share/icons/godot.png
+Icon=/usr/local/share/pixmaps/godot.png
 Terminal=false
 Categories=Development;IDE;Game;
 StartupWMClass=Godot
 EOF
+            sudo install -D -m 644 "$GODOT_TMP/$d_id.desktop" "/usr/local/share/applications/$d_id.desktop"
         done
+        rm -rf "$GODOT_TMP"
         echo "Godot: $("$HOME/.local/bin/godot" --version 2>/dev/null)   .NET: $("$HOME/.local/bin/godot-mono" --version 2>/dev/null)"
-        echo "Run 'godot' or 'godot-mono' (or pick them from the ChromeOS launcher). C# projects use the .NET SDK from install-dotnet."
+        echo "Run 'godot' or 'godot-mono' (or pick them from the Windows Start menu). C# projects use the .NET SDK from install-dotnet."
         echo "Exporting games needs the export templates (~2.5 GB): rerun with install-godot-templates."
     fi
 
@@ -4391,14 +4415,18 @@ if [[ "$FLAGS" =~ " install-antigravity " ]]; then
             if [ -d "$dir" ]; then sudo rm -rf "$dir.previous"; sudo mv "$dir" "$dir.previous"; fi
             sudo mv "$dir.new" "$dir"
         fi
-        mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons
+        mkdir -p ~/.local/bin
         ln -sfn "$dir/current/$bin" "$HOME/.local/bin/$bin"
         # Icon: the IDE ships a PNG; the desktop app keeps its icon inside resources/app.asar.
-        icon="$HOME/.local/share/icons/$bin.png"
+        # v1: the icon goes to /usr/local/share/pixmaps and the entry to /usr/local/share/applications, where
+        # WSLg's Start menu looks (Q20, P9). Both are made in a temporary folder and put in place with
+        # 'sudo install'; the Chromebook script wrote them under ~/.local/share.
+        icon="/usr/local/share/pixmaps/$bin.png"
+        tmp=$(mktemp -d)
         if [ "$kind" = ide ] && [ -f "$dir/current/resources/app/resources/linux/code.png" ]; then
-            cp "$dir/current/resources/app/resources/linux/code.png" "$icon"
+            sudo install -D -m 644 "$dir/current/resources/app/resources/linux/code.png" "$icon"
         elif [ "$kind" = app ] && [ -f "$dir/current/resources/app.asar" ]; then
-            python3 - "$dir/current/resources/app.asar" "$icon" << 'PY' || true
+            python3 - "$dir/current/resources/app.asar" "$tmp/$bin.png" << 'PY' || true
 import json, struct, sys
 from pathlib import Path
 asar, out = Path(sys.argv[1]), Path(sys.argv[2])
@@ -4408,9 +4436,10 @@ with asar.open("rb") as f:
     entry = json.loads(f.read(json_size).decode())["files"]["icon.png"]
     f.seek(8 + header_size + int(entry["offset"])); out.write_bytes(f.read(int(entry["size"])))
 PY
+            if [ -s "$tmp/$bin.png" ]; then sudo install -D -m 644 "$tmp/$bin.png" "$icon"; fi
         fi
-        # Exec is absolute: the ChromeOS launcher starts apps without your ~/.bashrc PATH.
-        cat > "$HOME/.local/share/applications/$bin.desktop" << EOF
+        # Exec is absolute: the Start menu starts apps without your ~/.bashrc PATH.
+        cat > "$tmp/$bin.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=$name
@@ -4422,7 +4451,9 @@ Categories=Development;IDE;
 StartupNotify=true
 StartupWMClass=$wmclass
 EOF
-        echo "$name: run '$bin' or pick it from the ChromeOS launcher (it can take a minute to appear)."
+        sudo install -D -m 644 "$tmp/$bin.desktop" "/usr/local/share/applications/$bin.desktop"
+        rm -rf "$tmp"
+        echo "$name: run '$bin' or pick it from the Windows Start menu (it can take a minute to appear)."
     }
 
     # Every Antigravity tarball in ./assets (then the current directory) is installed: the IDE and
@@ -6343,7 +6374,7 @@ if [[ "$FLAGS" =~ " install-redis " ]]; then
                     # v99: expose only the verified public package to apt's sandbox.
                     chmod 755 "$RI_TMP"; chmod 644 "$RI_TMP/$RI_DEB"
                     apt_get install -y "$RI_TMP/$RI_DEB" \
-                        && echo "Redis Insight ${RI_TAG#v} installed${RI_HAVE:+ (was $RI_HAVE)}: pick it from the ChromeOS launcher." \
+                        && echo "Redis Insight ${RI_TAG#v} installed${RI_HAVE:+ (was $RI_HAVE)}: pick it from the Windows Start menu." \
                         || echo "NOTICE: apt could not install $RI_DEB; rerun setup with install-redis."
                 fi
             else
@@ -6991,7 +7022,7 @@ info() {
             echo "  Symfony  REDIS_URL=redis://127.0.0.1:6379  (cache.adapter.redis, lock, Messenger)"
             echo "  Python   uv run --with redis python -c 'import redis; print(redis.Redis().ping())'"
             echo "  Node     npm install redis   ->   createClient({ url: 'redis://127.0.0.1:6379' })"
-            echo "  GUI      Redis Insight (ChromeOS launcher): add database 127.0.0.1:6379" ;;
+            echo "  GUI      Redis Insight (Windows Start menu): add database 127.0.0.1:6379" ;;
         memcached)
             echo "  no login (Memcached never leaves this machine)"
             echo "  shell    devsvc cli memcached      (the text protocol: stats, get KEY, set KEY 0 60 5 + a data line)"
@@ -7050,7 +7081,7 @@ info() {
                 echo "  no login (127.0.0.1 only; set MONGO_ROOT_PASSWORD in secrets.env before sharing it)   URL mongodb://127.0.0.1:27017"
             fi
             echo "  shell    devsvc cli mongodb   (mongosh)     tools: mongodump, mongorestore, mongoimport, mongoexport"
-            echo "  GUI      MongoDB Compass (ChromeOS launcher) with the URL above"
+            echo "  GUI      MongoDB Compass (Windows Start menu) with the URL above"
             echo "  DDEV     mongodb://devmongo:27017"
             echo "  Laravel  mongodb/laravel-mongodb: DB_CONNECTION=mongodb MONGODB_URI=mongodb://127.0.0.1:27017 MONGODB_DATABASE=app"
             echo "  Symfony  doctrine/mongodb-odm-bundle: MONGODB_URL=mongodb://127.0.0.1:27017 MONGODB_DB=app"
