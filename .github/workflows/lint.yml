@@ -4,9 +4,9 @@
 # Ported from dev-setup-chromebook v101's lint.yml. Only dev-*.sh at the repo root is linted;
 # reference/ is a read-only copy of the Chromebook bundle, linted in its own repo. Until the forked
 # scripts exist the shell steps find nothing and pass.
-# Not ported yet: the Chromebook's one-version-number check (waits on the plan's numbering and script
-# names), its release-archive and v101 regression tests (tests/ was not copied), and a PowerShell job
-# (added with the Windows-host script).
+# Not ported yet: the Chromebook's one-version-number check (comes with v1's CHANGELOG and README), and
+# its release-archive and v101 regression tests (tests/ was not copied; v1-plan.md, P22).
+# The powershell job checks dev-host-wsl.ps1 on a Windows runner: nothing is run, the file is only read.
 name: lint
 
 on:
@@ -45,6 +45,50 @@ jobs:
           shellcheck --version
           if [ ${#files[@]} -eq 0 ]; then echo "no dev-*.sh scripts at the repo root yet"; exit 0; fi
           shellcheck -S error "${files[@]}"
+
+  powershell:
+    # dev-host-wsl.ps1 is written for Windows PowerShell 5.1, which every Windows 11 has, and is ASCII-only
+    # so 5.1 cannot misread its encoding (v1-plan.md, P15). 'shell: powershell' is 5.1 on the Windows
+    # runners ('pwsh' would be PowerShell 7). The script is parsed and analysed, never run.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ASCII only
+        shell: powershell
+        run: |
+          $path = Join-Path $PWD 'dev-host-wsl.ps1'
+          $bytes = [IO.File]::ReadAllBytes($path)
+          $bad = @($bytes | Where-Object { $_ -gt 127 })
+          if ($bad.Count -gt 0) { Write-Output "non-ASCII bytes in dev-host-wsl.ps1: $($bad.Count)"; exit 1 }
+          Write-Output "ASCII only, $($bytes.Length) bytes"
+      - name: parse check (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          Write-Output ("Windows PowerShell " + $PSVersionTable.PSVersion.ToString())
+          if ($PSVersionTable.PSVersion.Major -ne 5) { Write-Output 'this step must run under Windows PowerShell 5.1'; exit 1 }
+          $path = Join-Path $PWD 'dev-host-wsl.ps1'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Output ("{0}:{1}: {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message) }
+            exit 1
+          }
+          Write-Output ("parse ok: " + $tokens.Count + " tokens")
+      - name: PSScriptAnalyzer (errors only)
+        # Warnings are left alone, as ShellCheck's are: Write-Host is how the script talks to the console.
+        shell: powershell
+        run: |
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+          }
+          Import-Module PSScriptAnalyzer
+          Write-Output ("PSScriptAnalyzer " + (Get-Module PSScriptAnalyzer).Version.ToString())
+          $found = @(Invoke-ScriptAnalyzer -Path (Join-Path $PWD 'dev-host-wsl.ps1') -Severity Error)
+          $found | ForEach-Object { Write-Output ("{0}: {1}: {2}" -f $_.Line, $_.RuleName, $_.Message) }
+          if ($found.Count -gt 0) { exit 1 }
+          Write-Output 'no Error-severity findings'
 
   secrets:
     runs-on: ubuntu-latest
