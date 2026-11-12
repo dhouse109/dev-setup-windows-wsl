@@ -5,27 +5,111 @@
 # (one section per script, newest version first).
 
 # >>> dev-bundle host guard >>>
-# These scripts are written for the Linux environment of a Chromebook (ChromeOS's Crostini container, or
-# the Linux VM newer ChromeOS releases create) running Debian 13. They use sudo freely, add apt sources and
-# change system files, so on any other machine they stop here. DEV_BUNDLE_ANY_HOST=1 runs them anyway, at
-# your own risk; steps that only make sense on ChromeOS (removing the Linux user's password) still skip.
-DEV_ON_CHROMEOS=0
-if [ -e /dev/.cros_milestone ] || [ -d /opt/google/cros-containers ] \
-    || dpkg-query -W -f='${Status}' cros-guest-tools cros-garcon 2> /dev/null | grep -q 'ok installed'; then
-    DEV_ON_CHROMEOS=1
+# v1: these scripts are written for Debian 13 on WSL2 on a Windows laptop. They use sudo freely, add apt
+# sources and change system files, so on any other machine they stop here. DEV_BUNDLE_ANY_HOST=1 runs them
+# anyway, at your own risk (the Chromebook guard's name and wording, kept so this stays a straight edit of
+# it: Q22). The Chromebook guard looked for ChromeOS's markers and set DEV_ON_CHROMEOS; this one sets
+# DEV_ON_WSL. WSL is $WSL_DISTRO_NAME, or either name WSL registers its interop under in binfmt_misc:
+# WSLInterop, or WSLInterop-late, the name it uses when systemd is on (P1). WSL 2 is required (Q22: WSL 1
+# has no systemd, Docker or WSLg). It is told from WSL 1 by "WSL2" in the kernel release, which holds for
+# Microsoft's kernel (P1). Both strings are confirmed on d3 at step 3 of the first run.
+DEV_ON_WSL=0
+if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -e /proc/sys/fs/binfmt_misc/WSLInterop ] \
+    || [ -e /proc/sys/fs/binfmt_misc/WSLInterop-late ]; then
+    DEV_ON_WSL=1
 fi
-if [ "$DEV_ON_CHROMEOS" != 1 ] && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
-    echo "$(basename "$0"): this is not ChromeOS's Linux, so nothing was changed." >&2
-    echo "  These scripts are made for a Chromebook's Linux (Debian 13) and assume it throughout." >&2
+if [ "$DEV_ON_WSL" != 1 ] && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
+    echo "$(basename "$0"): this is not Debian on WSL2, so nothing was changed." >&2
+    echo "  These scripts are made for Debian 13 on WSL2 on a Windows laptop and assume it throughout." >&2
     echo "  To run them anyway, at your own risk:  DEV_BUNDLE_ANY_HOST=1 $0 $*" >&2
     exit 1
 fi
+if [ "$DEV_ON_WSL" = 1 ] && [[ "$(uname -r)" != *WSL2* ]] && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
+    echo "$(basename "$0"): this is WSL 1, not WSL 2 (kernel release: $(uname -r)), so nothing was changed." >&2
+    echo "  These scripts need WSL 2: WSL 1 has no systemd, Docker or WSLg." >&2
+    echo "  Convert the distro from Windows:  wsl --set-version <distro> 2" >&2
+    echo "  If this is WSL 2 on a kernel of your own, at your own risk:  DEV_BUNDLE_ANY_HOST=1 $0 $*" >&2
+    exit 1
+fi
 if ! grep -Eqs '^ID="?debian"?$' /etc/os-release && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
-    echo "$(basename "$0"): this Linux is not Debian; the scripts expect ChromeOS's default, Debian 13." >&2
+    echo "$(basename "$0"): this Linux is not Debian; the scripts expect Debian 13 on WSL2." >&2
     echo "  To run them anyway, at your own risk:  DEV_BUNDLE_ANY_HOST=1 $0 $*" >&2
     exit 1
 fi
 # <<< dev-bundle host guard <<<
+
+# >>> dev-bundle wsl preflight >>>
+# v1: setup's preflight (Q29), in setup only. It sits between the host guard and the screen-output block, so
+# a run it refuses has written nothing, not even a log. Each check that fails stops the run with one message
+# that names the fix; the last check only warns. The checks only read, and the recorder below starts this
+# script again, so they run in both passes; the warning is printed in the pass that is recorded.
+# One limit: a script cannot check itself for CRLF, because bash fails on its first line before any check
+# runs. Check 3 protects the other scripts, which are run next; .gitattributes protects all of them.
+_pf_stop() {   # _pf_stop MESSAGE [FIX LINE...]
+    echo "$(basename "$0"): preflight: $1" >&2
+    shift
+    [ "$#" -eq 0 ] || printf '  %s\n' "$@" >&2
+    echo "  Nothing was installed or changed." >&2
+    exit 1
+}
+_pf_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2> /dev/null && pwd -P || true)"; [ -n "$_pf_dir" ] || _pf_dir="$PWD"
+# 1. Not root: the bundle installs into the user's home and calls sudo where it needs root. A distro that
+# starts as root has no user account yet (the host script stops for that and says how to create it).
+[ "$(id -u)" != 0 ] || _pf_stop "this is running as root." \
+    "Run it as the distro's user, without sudo in front. If Debian opens as root, create the user first:" \
+    "run dev-host-wsl.ps1 on Windows and follow what it prints."
+# 2. Not under /mnt/*: on the Windows filesystem exec bits, setuid sandboxes, pipx and venv paths break,
+# and it is slow. The bundle lives in the Linux home.
+case "$_pf_dir/" in /mnt/*) _pf_stop "the bundle is in $_pf_dir, on the Windows filesystem." \
+    "Clone it into the Linux home instead (for example ~/dev-setup-windows-wsl) and run it from there." ;; esac
+# 3. No CR line endings in the dev-*.sh files next to this one: a script that passed through Windows Git
+# or a Windows editor fails with "$'\r': command not found".
+_pf_crlf=$(grep -ls $'\r$' "$_pf_dir"/dev-*.sh 2> /dev/null | sed 's|.*/||' | tr '\n' ' ')
+[ -z "$_pf_crlf" ] || _pf_stop "these scripts have Windows (CRLF) line endings: $_pf_crlf" \
+    "This repo's .gitattributes keeps every *.sh LF: get the scripts with git clone inside WSL (not copied" \
+    "over from Windows, not saved by a Windows editor), or strip the CRs:  sed -i 's/\\r\$//' <those files>"
+# 4. systemd is running: Docker, kind, Langfuse and Ollama's service need it, and Debian's WSL image may
+# leave it off. /run/systemd/system exists only when systemd is PID 1.
+[ -d /run/systemd/system ] || _pf_stop "systemd is not running in this distro." \
+    "Run dev-host-wsl.ps1 on Windows (it writes [boot] systemd=true to /etc/wsl.conf), then from Windows:" \
+    "wsl --shutdown   and open Debian again."
+# 5. No Windows directory on PATH (Q9; stop, not warn: P2): a Windows npm or code there satisfies
+# 'command -v' and setup would skip an install without saying so.
+_pf_win=''; _pf_n=0
+IFS=: read -ra _pf_path <<< "$PATH"
+for _pf_p in "${_pf_path[@]}"; do
+    case "$_pf_p" in /mnt/?|/mnt/?/*) _pf_n=$((_pf_n + 1)); [ -n "$_pf_win" ] || _pf_win=$_pf_p ;; esac
+done
+[ "$_pf_n" = 0 ] || _pf_stop "PATH holds $_pf_n Windows director$([ "$_pf_n" = 1 ] && echo y || echo ies) (the first: $_pf_win)." \
+    "Set  appendWindowsPath=false  under [interop] in /etc/wsl.conf (dev-host-wsl.ps1 on Windows does it)," \
+    "then from Windows:  wsl --shutdown   and open Debian again. If your own ~/.bashrc adds the entry, remove it."
+# 6. Docker Desktop's WSL integration is not on for this distro (Q4): the bundle installs docker-ce inside
+# the distro and the two conflict. Stop only on a positive sign seen from inside the distro (P3): the docker
+# command resolving into Docker Desktop's shared mount, or its proxy process running here ([p] keeps grep
+# from finding itself). "Cannot tell" counts as not on. Neither sign is confirmed on a laptop yet (P3).
+_pf_dd=''
+case "$(readlink -f "$(command -v docker 2> /dev/null)" 2> /dev/null)" in
+    /mnt/wsl/docker-desktop*) _pf_dd="the docker command here is Docker Desktop's" ;;
+esac
+if [ -z "$_pf_dd" ] && grep -qsa '/mnt/wsl/docker-deskto[p]' /proc/[0-9]*/cmdline; then
+    _pf_dd="Docker Desktop's proxy is running in this distro"
+fi
+[ -z "$_pf_dd" ] || _pf_stop "Docker Desktop's WSL integration is on for this distro ($_pf_dd)." \
+    "The bundle uses docker-ce inside the distro. In Docker Desktop: Settings > Resources > WSL integration," \
+    "turn it off for this distro, Apply & restart, then run setup again."
+# 7. sudo works without a password (Q7, Q21): setup never prompts (rule 7). The host script writes the
+# drop-in, /etc/sudoers.d/dev-bundle, once the user account exists.
+sudo -n true 2> /dev/null || _pf_stop "sudo is missing or asks for a password." \
+    "Run dev-host-wsl.ps1 on Windows: it installs sudo if the image lacks it and writes the NOPASSWD" \
+    "drop-in /etc/sudoers.d/dev-bundle for this user. Then run setup again."
+# 8. Debian 13: warn only (Q23). The guard above checked ID=debian.
+_pf_ver=$(. /etc/os-release 2> /dev/null && echo "${VERSION_ID:-}")
+if [ "$_pf_ver" != 13 ] && { [ -n "${DEV_SCREEN_OUTPUT:-}" ] || [ "${DEV_SCREEN_SAVE:-1}" = 0 ]; }; then
+    echo "NOTICE: preflight: this is Debian ${_pf_ver:-with no VERSION_ID (testing or sid?)}, not 13 (trixie), which the bundle is written for. Continuing."
+fi
+unset -f _pf_stop
+unset _pf_dir _pf_crlf _pf_win _pf_n _pf_path _pf_p _pf_dd _pf_ver
+# <<< dev-bundle wsl preflight <<<
 
 # >>> dev-bundle screen output >>>
 # v97: the run's screen output is also saved, as plain text, in assets/logs/<script>-<date-time>.output next to
@@ -133,6 +217,30 @@ DEV_REQUESTED_FLAGS=("$@")
 FLAGS=" $* "
 
 echo "Active Installation Flags: $FLAGS"
+
+# v1: the "not yet supported on WSL" list (Q13). One list, the same in all four scripts: flag, then its
+# reason (P4). The code behind these flags is forked untouched from Chromebook v101 (Q32) and is edited when
+# a flag comes off the list. Naming one on the command line stops here, before anything is expanded,
+# installed or changed. A group that brings one in loses it after the dependency guards (section 4 below).
+DEV_WSL_REFUSED=(
+    'install-lan|waits for the Tailscale decision (Q8)'
+    'install-lan-share|waits for the Tailscale decision (Q8)'
+    'install-android-native|Android Studio comes later, on Windows (Q10)'
+    'install-retro|planned for a later version (Q11)'
+    'install-com|planned for a later version (Q11)'
+)
+_refused=0
+for _r in "${DEV_WSL_REFUSED[@]}"; do
+    if [[ "$FLAGS" == *" ${_r%%|*} "* ]]; then
+        echo "$(basename "$0"): ${_r%%|*} is not yet supported on WSL: ${_r#*|}." >&2
+        _refused=1
+    fi
+done
+if [ "$_refused" = 1 ]; then
+    echo "  Nothing was installed or changed. Run again without the flag(s) named above." >&2
+    exit 1
+fi
+unset _refused _r
 
 # 1. The "Install All" Master Switch
 if [[ "$FLAGS" =~ " install-all " ]]; then
@@ -320,6 +428,18 @@ fi
 if [[ "$FLAGS" =~ " install-gemma " ]] || [[ "$FLAGS" =~ " install-models " ]] || [[ "$FLAGS" =~ " install-ollama-containers " ]]; then
     FLAGS+=" install-ollama "
 fi
+
+# 4. Not yet supported on WSL
+# v1: a refused flag that a group brought in is taken out of FLAGS here, after the dependency guards, with
+# one notice (Q13). install-ecosystems, and so install-all, brings in install-android-native. Everything
+# below this block reads FLAGS, so the flag's stage, checks, init steps and demos are simply not selected.
+for _r in "${DEV_WSL_REFUSED[@]}"; do
+    if [[ "$FLAGS" == *" ${_r%%|*} "* ]]; then
+        while [[ "$FLAGS" == *" ${_r%%|*} "* ]]; do FLAGS=${FLAGS// ${_r%%|*} / }; done
+        echo "NOTICE: ${_r%%|*} skipped: not yet supported on WSL (${_r#*|})."
+    fi
+done
+unset _r
 # =================================================================
 
 # >>> dev-bundle apt output >>>

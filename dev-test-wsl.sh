@@ -82,23 +82,34 @@
 # Keep the FLAG EXPANSION block identical to the installer's when you bump versions.
 
 # >>> dev-bundle host guard >>>
-# These scripts are written for the Linux environment of a Chromebook (ChromeOS's Crostini container, or
-# the Linux VM newer ChromeOS releases create) running Debian 13. They use sudo freely, add apt sources and
-# change system files, so on any other machine they stop here. DEV_BUNDLE_ANY_HOST=1 runs them anyway, at
-# your own risk; steps that only make sense on ChromeOS (removing the Linux user's password) still skip.
-DEV_ON_CHROMEOS=0
-if [ -e /dev/.cros_milestone ] || [ -d /opt/google/cros-containers ] \
-    || dpkg-query -W -f='${Status}' cros-guest-tools cros-garcon 2> /dev/null | grep -q 'ok installed'; then
-    DEV_ON_CHROMEOS=1
+# v1: these scripts are written for Debian 13 on WSL2 on a Windows laptop. They use sudo freely, add apt
+# sources and change system files, so on any other machine they stop here. DEV_BUNDLE_ANY_HOST=1 runs them
+# anyway, at your own risk (the Chromebook guard's name and wording, kept so this stays a straight edit of
+# it: Q22). The Chromebook guard looked for ChromeOS's markers and set DEV_ON_CHROMEOS; this one sets
+# DEV_ON_WSL. WSL is $WSL_DISTRO_NAME, or either name WSL registers its interop under in binfmt_misc:
+# WSLInterop, or WSLInterop-late, the name it uses when systemd is on (P1). WSL 2 is required (Q22: WSL 1
+# has no systemd, Docker or WSLg). It is told from WSL 1 by "WSL2" in the kernel release, which holds for
+# Microsoft's kernel (P1). Both strings are confirmed on d3 at step 3 of the first run.
+DEV_ON_WSL=0
+if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -e /proc/sys/fs/binfmt_misc/WSLInterop ] \
+    || [ -e /proc/sys/fs/binfmt_misc/WSLInterop-late ]; then
+    DEV_ON_WSL=1
 fi
-if [ "$DEV_ON_CHROMEOS" != 1 ] && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
-    echo "$(basename "$0"): this is not ChromeOS's Linux, so nothing was changed." >&2
-    echo "  These scripts are made for a Chromebook's Linux (Debian 13) and assume it throughout." >&2
+if [ "$DEV_ON_WSL" != 1 ] && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
+    echo "$(basename "$0"): this is not Debian on WSL2, so nothing was changed." >&2
+    echo "  These scripts are made for Debian 13 on WSL2 on a Windows laptop and assume it throughout." >&2
     echo "  To run them anyway, at your own risk:  DEV_BUNDLE_ANY_HOST=1 $0 $*" >&2
     exit 1
 fi
+if [ "$DEV_ON_WSL" = 1 ] && [[ "$(uname -r)" != *WSL2* ]] && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
+    echo "$(basename "$0"): this is WSL 1, not WSL 2 (kernel release: $(uname -r)), so nothing was changed." >&2
+    echo "  These scripts need WSL 2: WSL 1 has no systemd, Docker or WSLg." >&2
+    echo "  Convert the distro from Windows:  wsl --set-version <distro> 2" >&2
+    echo "  If this is WSL 2 on a kernel of your own, at your own risk:  DEV_BUNDLE_ANY_HOST=1 $0 $*" >&2
+    exit 1
+fi
 if ! grep -Eqs '^ID="?debian"?$' /etc/os-release && [ "${DEV_BUNDLE_ANY_HOST:-0}" != 1 ]; then
-    echo "$(basename "$0"): this Linux is not Debian; the scripts expect ChromeOS's default, Debian 13." >&2
+    echo "$(basename "$0"): this Linux is not Debian; the scripts expect Debian 13 on WSL2." >&2
     echo "  To run them anyway, at your own risk:  DEV_BUNDLE_ANY_HOST=1 $0 $*" >&2
     exit 1
 fi
@@ -192,6 +203,30 @@ net_retry() {   # net_retry SAFE_LABEL COMMAND [ARG...]; no expanded command/sec
 FLAGS=" $* "
 
 echo "Active Test Flags: $FLAGS"
+
+# v1: the "not yet supported on WSL" list (Q13). One list, the same in all four scripts: flag, then its
+# reason (P4). The code behind these flags is forked untouched from Chromebook v101 (Q32) and is edited when
+# a flag comes off the list. Naming one on the command line stops here, before anything is expanded,
+# installed or changed. A group that brings one in loses it after the dependency guards (section 4 below).
+DEV_WSL_REFUSED=(
+    'install-lan|waits for the Tailscale decision (Q8)'
+    'install-lan-share|waits for the Tailscale decision (Q8)'
+    'install-android-native|Android Studio comes later, on Windows (Q10)'
+    'install-retro|planned for a later version (Q11)'
+    'install-com|planned for a later version (Q11)'
+)
+_refused=0
+for _r in "${DEV_WSL_REFUSED[@]}"; do
+    if [[ "$FLAGS" == *" ${_r%%|*} "* ]]; then
+        echo "$(basename "$0"): ${_r%%|*} is not yet supported on WSL: ${_r#*|}." >&2
+        _refused=1
+    fi
+done
+if [ "$_refused" = 1 ]; then
+    echo "  Nothing was installed or changed. Run again without the flag(s) named above." >&2
+    exit 1
+fi
+unset _refused _r
 
 # 1. The "Install All" Master Switch
 if [[ "$FLAGS" =~ " install-all " ]]; then
@@ -377,6 +412,18 @@ fi
 if [[ "$FLAGS" =~ " install-gemma " ]] || [[ "$FLAGS" =~ " install-models " ]] || [[ "$FLAGS" =~ " install-ollama-containers " ]]; then
     FLAGS+=" install-ollama "
 fi
+
+# 4. Not yet supported on WSL
+# v1: a refused flag that a group brought in is taken out of FLAGS here, after the dependency guards, with
+# one notice (Q13). install-ecosystems, and so install-all, brings in install-android-native. Everything
+# below this block reads FLAGS, so the flag's stage, checks, init steps and demos are simply not selected.
+for _r in "${DEV_WSL_REFUSED[@]}"; do
+    if [[ "$FLAGS" == *" ${_r%%|*} "* ]]; then
+        while [[ "$FLAGS" == *" ${_r%%|*} "* ]]; do FLAGS=${FLAGS// ${_r%%|*} / }; done
+        echo "NOTICE: ${_r%%|*} skipped: not yet supported on WSL (${_r#*|})."
+    fi
+done
+unset _r
 # =================================================================
 
 has() { [[ "$FLAGS" =~ " $1 " ]]; }
