@@ -425,7 +425,7 @@ if ! grep -q '^# --- Drupal hosting (install-drupal)' "$SECRETS"; then
     cat << 'EOF' >> "$SECRETS"
 
 # --- This machine ----------------------------------------------------------------
-# A short name for THIS Chromebook (e.g. joxer). Used to label the SSH key uploaded to GitHub,
+# A short name for THIS laptop (e.g. d3). Used to label the SSH key uploaded to GitHub,
 # Pantheon and Acquia, so one machine's access can be revoked without touching the others.
 # Give the tokens below the same label where the platform lets you name them.
 MACHINE_LABEL=""
@@ -588,7 +588,7 @@ if ! grep -q '^# --- Personal agents (install-hermes' "$SECRETS"; then
 
 # --- Personal agents (install-hermes, install-openclaw) ---------------------------------------------
 # Optional. dev-init gives Hermes Agent and OpenClaw a model from these. Both need a model with at least
-# a 64K-token context window (Hermes refuses less), more than an 8 GB Chromebook can hold, so use a
+# a 64K-token context window (Hermes refuses less), more than the bundle's local models are set up for, so use a
 # cloud key or a bigger machine's Ollama. AGENT_PROVIDER:
 #   auto           the first that is set: AGENT_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY, above),
 #                  OPENROUTER_API_KEY, OLLAMA_REMOTE with AGENT_MODEL
@@ -910,10 +910,8 @@ section "Docker"
 if id -nG | grep -qw docker; then already "you are in the docker group in this shell"
 elif getent group docker | grep -qw "$USER"; then todo "docker group not active in this shell: run 'newgrp docker' or log out/in"
 else todo "add yourself to the docker group: sudo usermod -aG docker \$USER"; fi
-# v69: GPU. Windowed OpenGL needs the render node, which is group 'render' (see dev-setup).
-if id -nG | tr ' ' '\n' | grep -qx render; then already "render group active (GPU acceleration for windowed apps)"
-elif getent group render | grep -qw "$USER"; then todo "render group not active yet: shut Linux down (right-click Terminal > Shut down Linux) and reopen it, for GPU acceleration"
-elif getent group render > /dev/null; then todo "GPU: sudo usermod -aG video,render \$USER, then shut Linux down and reopen it"; fi
+# v1: no render-group lines here. WSLg's GPU is /dev/dxg, with no render node and no group to join, and
+# setup adds none; the Chromebook script (v69) reported the group and printed a todo to shut Linux down.
 
 # =================================================================
 # CONDITIONAL
@@ -1082,16 +1080,9 @@ fi
 
 if has install-mobile || has install-tauri || has install-rn || has install-flutter || has install-android-native; then
     section "Android (mobile base)"
-    # v56: connect to the Android runtime explicitly; the first connect triggers an
-    # "Allow USB debugging?" dialog on the ChromeOS side that must be accepted once.
-    adb connect arc > /dev/null 2>&1 || adb connect 100.115.92.2:5555 > /dev/null 2>&1
-    if adb devices 2>/dev/null | tail -n +2 | grep -qE '\bdevice$'; then
-        already "adb sees the Chromebook's Android runtime"
-    elif adb devices 2>/dev/null | grep -q unauthorized; then
-        todo "accept the 'Allow USB debugging?' dialog on the ChromeOS screen (tick 'Always allow'), then rerun"
-    else
-        todo "enable ADB debugging: ChromeOS Settings -> About ChromeOS -> Linux development environment -> Develop Android apps (needs a restart), then rerun"
-    fi
+    # v1 (Q10, Q34a): no 'adb connect arc' and none of its three ChromeOS todos. There is no Android runtime
+    # beside WSL and v1 attaches no device, so init says so in one skip line.
+    skip "no Android device in v1: adb has nothing to connect to (Android Studio, the emulator and USB devices come later, on Windows)"
     if has install-mobile || has install-flutter; then
         flutter config --no-analytics > /dev/null 2>&1 && ok "flutter analytics disabled"
         yes 2>/dev/null | flutter doctor --android-licenses > /dev/null 2>&1 && ok "flutter: Android licenses accepted"
@@ -1129,7 +1120,7 @@ if has install-antigravity; then
     [ -x /opt/antigravity-ide/current/antigravity-ide ] && AG_APPS="antigravity-ide"
     [ -x /opt/antigravity/current/antigravity ] && AG_APPS="${AG_APPS:+$AG_APPS, }antigravity"
     if [ -n "$AG_APPS" ]; then
-        skip "Antigravity ($AG_APPS) signs in with your Google account on first launch: open it from the ChromeOS launcher"
+        skip "Antigravity ($AG_APPS) signs in with your Google account on first launch: open it from the Windows Start menu"
     else
         skip "no Antigravity IDE or desktop app installed (optional: put its Linux tarball in the bundle's ./assets and rerun dev-setup with install-antigravity)"
     fi
@@ -1616,7 +1607,9 @@ if has install-gcp; then
         gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" > /dev/null 2>&1 \
             && ok "gcloud activated the service account from GOOGLE_APPLICATION_CREDENTIALS" || todo "gcloud auth activate-service-account failed; check the key file path in $SECRETS"
     elif [ "$INTERACTIVE" = 1 ]; then
-        # Chrome is installed in the container, so the browser flow works without --no-browser.
+        # v1: the sign-in link opens in the Windows browser, through the bundle's opener (Q19), and its
+        # localhost callback comes back through WSL's localhost forwarding, so the browser flow works without
+        # --no-browser (to confirm on the first run). On a Chromebook it was Linux Chrome in the container.
         gcloud auth login && ok "gcloud logged in" || todo "gcloud auth login"
     else
         todo "gcloud auth login (or a service-account key in $SECRETS; running noninteractive)"
@@ -1780,7 +1773,7 @@ if has install-lazarus; then
     LAZ_MISSING=""
     for LAZ_F in "$HOME/.lazarus/bin/lazarus-floating" "$HOME/.lazarus/bin/lazarus-docked" \
             "$HOME/.lazarus-dark/bin/lazarus-floating" "$HOME/.lazarus-dark/bin/lazarus-docked" \
-            "$HOME/.local/share/applications/lazarus-dark.desktop"; do
+            "/usr/local/share/applications/lazarus-dark.desktop"; do   # v1 (Q20): where setup writes the dark launcher under WSL
         [ -e "$LAZ_F" ] || LAZ_MISSING="$LAZ_MISSING ${LAZ_F/#$HOME/\~}"
     done
     if ! dpkg-query -W -f='${Status}' lazarus-project 2> /dev/null | grep -q 'ok installed'; then
@@ -1817,7 +1810,7 @@ if has install-godot; then
     else
         todo "godot not found: rerun dev-setup with install-godot"
     fi
-    already "new projects: pick the Compatibility renderer (Forward+ and Mobile need Vulkan, which Crostini does not expose). Android export settings (SDK path, debug keystore) are per machine in Editor Settings > Export > Android"
+    already "new projects: pick the Compatibility renderer (the bundle's launchers use OpenGL, which WSLg provides through D3D12; Forward+ and Mobile need Vulkan, which the bundle does not rely on). Android export settings (SDK path, debug keystore) are per machine in Editor Settings > Export > Android"
 fi
 
 if has install-drupal; then
@@ -2390,7 +2383,8 @@ fi
 
 # v86: personal agents (install-hermes / install-openclaw). No account of their own: each needs a
 # model, and init gives it one from secrets.env (AGENT_PROVIDER, AGENT_MODEL and a key, or
-# OLLAMA_REMOTE). Both need a 64K-token context, more than an 8 GB Chromebook holds locally. Init only
+# OLLAMA_REMOTE). Both need a 64K-token context, more than the bundle's local models are set up for (v1:
+# Ollama's settings stay sized as on the 8 GB Chromebooks, Q30). Init only
 # replaces a model it set itself (recorded in ~/.hermes/.dev-init-model and ~/.openclaw/.dev-init-model
 # as "what init was asked for<TAB>what it set"): a model you picked with 'hermes model' or
 # 'openclaw models set' stays. Channels, gateway services, Nous Portal and skills stay manual.
@@ -2582,7 +2576,8 @@ if has install-openclaw; then
             fi
         fi
         # OpenClaw runs any shell command without asking by default (exec security full, ask off), as you,
-        # and the Crostini user has passwordless sudo. Unless you chose a mode yourself, it asks first.
+        # and this user has passwordless sudo (v1: through the host script's drop-in). Unless you chose a mode
+        # yourself, it asks first.
         if [ -f "$O_CFG" ] && [ -n "$O_WHEN$(jq -r '.wizard.lastRunAt // empty' "$O_CFG" 2> /dev/null)" ]; then
             O_MODE=$(jq -r '.tools.exec.mode // empty' "$O_CFG" 2> /dev/null)
             if [ -z "$O_MODE" ] && [ -z "$(jq -r '.tools.exec.security // .tools.exec.ask // empty' "$O_CFG" 2> /dev/null)" ]; then

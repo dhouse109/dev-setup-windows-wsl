@@ -23,13 +23,13 @@
 #   - does only cheap preparation; big builds (raylib, Tauri, JetNews, petclinic...) happen the
 #     first time you launch the demo, so an install-all pass takes minutes, not an hour
 #   - writes ~/dev-demo/<stack>/run-<demo>.sh, which sets up PATH like a new terminal, starts
-#     whatever the demo needs, opens the browser in ChromeOS when there is a page to show, and
+#     whatever the demo needs, opens the Windows browser when there is a page to show, and
 #     stops its background pieces when you press Ctrl-C
 #   - lists everything in ~/dev-demo/README.md and ~/dev-demo/dev-demo.code-workspace
 #
 # Unattended except for demo-clean's question. Apt is used only for small build dependencies
 # (raylib's X11 headers, PHP's SQLite driver). Log: ./assets/logs/dev-demo-<timestamp>.log.
-# Memory: these Chromebooks give Linux ~6.4 GB. Run one heavy demo at a time (Gemma, local models,
+# Memory: Linux has up to WSL's ceiling (.wslconfig; v1: the Chromebooks gave Linux ~6.4 GB). Run one heavy demo at a time (Gemma, local models,
 # the Drupal RAG site, Langfuse, SQL Server, Oracle, kind, Android builds); the launchers say when a
 # demo is heavy.
 
@@ -419,11 +419,13 @@ demo_note() { echo "${_Y}>>${_R} $*"; }
 demo_step() { echo; echo "${_B}== $* ==${_R}"; }
 # demo_need CMD FLAG: stop with a pointer to the setup flag when a tool is missing
 demo_need() { command -v "$1" > /dev/null 2>&1 || { echo "This demo needs '$1': run dev-setup with $2 first (then open a new terminal)."; exit 1; }; }
-# demo_open URL: open in the ChromeOS browser (Crostini's URL handler), else the Linux default browser
+# demo_open URL: open in the Windows default browser, through the bundle's opener (v1, Q19: ~/.local/bin/dev-open,
+# written by dev-setup; it also takes a file:// path), else the Linux default browser. Every demo page goes
+# through this one function. On a Chromebook this called Crostini's URL handler.
 demo_open() {
     echo "  -> $1"
-    if [ -x /opt/google/cros-containers/bin/garcon-url-handler ]; then
-        /opt/google/cros-containers/bin/garcon-url-handler "$1" > /dev/null 2>&1 &
+    if [ -x "$HOME/.local/bin/dev-open" ]; then
+        "$HOME/.local/bin/dev-open" "$1" > /dev/null 2>&1 &
     elif command -v xdg-open > /dev/null 2>&1; then
         xdg-open "$1" > /dev/null 2>&1 &
     fi
@@ -486,8 +488,8 @@ demo_hold() { echo; read -rp "${1:-Press Enter to stop the demo} " _ || true; }
 docker_ok() {
     demo_need docker "the base install (Docker)"
     docker info > /dev/null 2>&1 && return 0
-    echo "Docker is installed but not reachable. Open a new terminal (docker group) or shut Linux down"
-    echo "once (right-click the Terminal icon > Shut down Linux) and try again."
+    echo "Docker is installed but not reachable. Open a new terminal (docker group), or restart the distro"
+    echo "from Windows (wsl --terminate ${WSL_DISTRO_NAME:-<distro>}) and try again."
     exit 1
 }
 ENVEOF
@@ -796,7 +798,7 @@ _start:
     svc     #0
     .data
 msg:
-    .ascii  "Hello from AArch64 assembly, running under qemu-aarch64 on an x86-64 Chromebook!\n"
+    .ascii  "Hello from AArch64 assembly, running under qemu-aarch64 on an x86-64 laptop!\n"
     len = . - msg
 EOF
     gen_file "$DIR/sysinfo.c" << 'EOF'
@@ -1295,31 +1297,31 @@ EOF
 use Drupal\node\Entity\Node;
 
 $articles = [
-  'Run order of the Chromebook bundle' => [
-    'The bundle is four scripts that take the same flags: dev-setup installs, dev-init applies logins and keys from secrets.env, dev-test verifies, and dev-demo downloads hands-on demos.',
-    'The order is init, setup, init again, then test. The first init run only writes the secrets template. Setup never prompts, and the test reports every login as a warning until init has applied secrets.env.',
-    'All four scripts share one version number: a change to any of them bumps all four.',
+  'Run order of the WSL bundle' => [
+    'The bundle is five scripts. dev-host-wsl.ps1 runs first, on Windows: it enables WSL, writes .wslconfig and wsl.conf, installs Debian and sets up passwordless sudo. The other four run inside Debian and take the same flags: dev-setup installs, dev-init applies logins and keys from secrets.env, dev-test verifies, and dev-demo downloads hands-on demos.',
+    'The order is the host script on Windows, then init, setup, init again, then test. The first init run only writes the secrets template. Setup never prompts, and the test reports every login as a warning until init has applied secrets.env.',
+    'All five scripts share one version number: a change to any of them bumps all five.',
   ],
-  'Memory on an 8 GB Chromebook' => [
-    'The Linux VM sees about 6.4 GB of the 8 GB. The ChromeOS memory balloon shows up as used memory in free, so judge headroom by the available column.',
+  'Memory under WSL' => [
+    'Linux gets a memory ceiling from .wslconfig on the Windows side. The host script sets it to about 75 percent of the laptop RAM (24 GB on a 32 GB laptop, 12 GB on a 16 GB one) and adds swap. Judge headroom by the available column of free; the devmem command says what holds the memory.',
     'Run one heavy thing at a time: an Ollama model, a kind cluster (about 2 GB), self-hosted Langfuse (about 3 GB), SQL Server or Oracle (about 2 GB each), this Drupal site with its two models, or an Android Gradle build.',
     'The command ollama stop gives a model its memory back at once; otherwise Ollama unloads it after five idle minutes. mssql down and oracle down do the same for the database servers.',
   ],
   'Ollama in the bundle' => [
     'install-ollama installs the server with a systemd drop-in: a 15-minute load timeout, at most two models loaded, one request per model, an 8192-token default context, flash attention and a q8_0 KV cache.',
-    'Inference is CPU-only in Crostini, because the container gets OpenGL through virgl but no CUDA, ROCm or Vulkan.',
+    'Inference uses CUDA on a laptop whose NVIDIA GPU WSL exposes, and the CPU on the others. The settings are still the ones sized for the 8 GB Chromebooks.',
     'Docker containers, such as DDEV running this site, reach Ollama at host.docker.internal only after setup runs with install-ollama-containers, which makes the server listen on every interface.',
   ],
   'Models pulled by install-models' => [
-    'deepseek-r1:1.5b is DeepSeek-R1 distilled into a 1.5B Qwen model, and the DeepSeek that fits on these Chromebooks. It reasons before answering.',
+    'deepseek-r1:1.5b is DeepSeek-R1 distilled into a 1.5B Qwen model, and the DeepSeek that fits on every machine the bundle runs on. It reasons before answering.',
     'qwen3.5:4b handles text and images, calls tools and can think. It answers the questions in this chatbot. qwen3-embedding:0.6b turns text into 1024-dimension vectors for search; it cannot chat.',
-    'A 7B model needs everything else closed. Bigger models run on another machine through OLLAMA_REMOTE, or as Ollama cloud models.',
+    'How large a model fits depends on the laptop: the memory ceiling in .wslconfig is the limit. Bigger models run on another machine through OLLAMA_REMOTE, or as Ollama cloud models.',
   ],
   'Which flag installs what' => [
-    'install-all covers every stack except the opt-in flags: install-models, install-godot-templates, install-asm-arm, install-ansible-core, install-db-server (SQL Server, Oracle and InterBase), install-oracle-full (Oracle on its full image), install-ldap (an lldap directory), install-ldap-full (OpenLDAP next to it), install-ollama-containers, install-lan and install-lan-share (the laptop network), install-com and install-retro (COM under Wine; DOS, Windows 3.1, 95, NT 4.0 and 2000, Delphi 1, and Delphi 3, 4, 5, 6 and 7 under Wine), and install-hermes and install-openclaw (the personal agents Hermes Agent and OpenClaw).',
+    'install-all covers every stack except the opt-in flags: install-models, install-godot-templates, install-asm-arm, install-ansible-core, install-db-server (SQL Server, Oracle and InterBase), install-oracle-full (Oracle on its full image), install-ldap (an lldap directory), install-ldap-full (OpenLDAP next to it), install-ollama-containers, and install-hermes and install-openclaw (the personal agents Hermes Agent and OpenClaw). Five flags of the Chromebook bundle are not yet supported on WSL and are refused or skipped: install-lan and install-lan-share (the laptop network), install-android-native, install-com and install-retro.',
     'install-laravel installs the Laravel installer (laravel new) and install-symfony the Symfony CLI (symfony new), both on top of install-web's Composer and PHP extensions. install-drupal installs Terminus, the Acquia CLI and the Upsun CLI next to DDEV. install-iac installs Terraform, tflint, Bicep and the full Ansible package. install-agentic installs Temporal, LangGraph, Pydantic and Langfuse.',
   ],
-  'Firebird and InterBase on the Chromebook' => [
+  'Firebird and InterBase in the bundle' => [
     'install-db installs Firebird 4 with its embedded engine, so a program opens a .fdb file with no server running. Its isql is called isql-fb, because unixODBC owns isql.',
     'Firebird forked from InterBase 6.0 in 2000 and cannot open a modern InterBase database. install-interbase, part of install-db-server, installs Embarcadero InterBase from a download placed in the bundle assets folder; the free Developer Edition must be registered before its server starts.',
     'Lazarus programs reach both through SQLdb TIBConnection. A TSQLDBLibraryLoader picks the client library: libfbclient.so.2 for Firebird, /opt/interbase/lib/libgds.so for InterBase.',
@@ -1757,7 +1759,7 @@ demo_godot() {
     write_run << 'EOF'
 demo_need godot install-godot
 mapfile -t PROJ < <(find . -name project.godot -not -path './.git/*' -printf '%h\n' | sed 's|^\./||' | sort)
-demo_note "Your launchers use the OpenGL (Compatibility) renderer, the one virgl supports: 2D demos and"
+demo_note "Your launchers use the OpenGL (Compatibility) renderer, which WSLg provides through D3D12: 2D demos and"
 demo_note "Compatibility demos look right; Forward+ 3D demos fall back and may look plainer."
 demo_menu "Open which demo? (mono/... = C#, opens in the .NET editor)" "${PROJ[@]}" || exit 0
 if [[ "$DEMO_CHOICE" == mono/* ]]; then GD=godot-mono; else GD=godot; fi
@@ -1793,7 +1795,7 @@ demo_rn() {
     write_run << 'EOF'
 demo_need npm install-node
 [ -d node_modules ] || npm install --no-audit --no-fund || exit 1
-demo_note "Web target on :8081 (Crostini has no Android emulator). Press w if the browser does not open."
+demo_note "Web target on :8081 (no Android emulator in v1). Press w if the browser does not open."
 npx expo start --web --port 8081
 EOF
     done_demo
@@ -2283,21 +2285,25 @@ if __name__ == "__main__":
     main()
 EOF
             gen_file "$DIR/docs/run-order.md" << 'EOF'
-# Run order of the Chromebook bundle
+# Run order of the WSL bundle
 
-The bundle is four scripts that take the same flags: dev-setup installs, dev-init applies logins and
+The bundle is five scripts. dev-host-wsl.ps1 runs first, on Windows: it enables WSL, writes .wslconfig
+and wsl.conf, installs Debian and sets up passwordless sudo. The other four run inside Debian and take
+the same flags: dev-setup installs, dev-init applies logins and
 keys from ~/.config/dev-init/secrets.env, dev-test verifies, and dev-demo downloads hands-on demos.
 
-The order is init, setup, init again, then test. The first init run only writes the secrets template.
+The order is the host script on Windows, then init, setup, init again, then test. The first init run
+only writes the secrets template.
 Setup never prompts. The test reports every login as a WARN until init has applied secrets.env.
 
-All four scripts share one version number: a change to any of them bumps all four.
+All five scripts share one version number: a change to any of them bumps all five.
 EOF
             gen_file "$DIR/docs/memory.md" << 'EOF'
-# Memory on an 8 GB Chromebook
+# Memory under WSL
 
-The Linux VM sees about 6.4 GB of the 8 GB. ChromeOS's memory balloon shows up as "used" in free,
-so judge headroom by the "available" column.
+Linux gets a memory ceiling from .wslconfig on the Windows side. The host script sets it to about 75%
+of the laptop's RAM (24 GB on a 32 GB laptop, 12 GB on a 16 GB one) and adds swap. Judge headroom by
+the "available" column of free; 'devmem' says what holds the memory.
 
 Run one heavy thing at a time: an Ollama model, a kind cluster (about 2 GB), self-hosted Langfuse
 (about 3 GB), SQL Server or Oracle (about 2 GB each), or an Android Gradle build. 'ollama stop <model>'
@@ -2311,8 +2317,8 @@ install-ollama installs the server with a systemd drop-in: a 15-minute load time
 models loaded (Ollama loads a second one only when both fit), one request per model, an 8192-token default context, flash attention and a q8_0 KV cache.
 Change a value with 'sudo systemctl edit ollama', which writes an override that wins.
 
-Inference is CPU-only in Crostini, because the container exposes OpenGL through virgl but no CUDA,
-ROCm or Vulkan. 'ollama ps' shows 100% CPU for every model.
+Inference uses CUDA on a laptop whose NVIDIA GPU WSL exposes, and the CPU on the others. 'ollama ps'
+shows where a loaded model runs. The settings above are still the ones sized for the 8 GB Chromebooks.
 
 OLLAMA_REMOTE in secrets.env points the 'ollama-remote' command at a bigger machine's Ollama, for
 models that do not fit here. Plain 'ollama' always stays on this machine.
@@ -2321,33 +2327,32 @@ EOF
 # Models pulled by install-models
 
 deepseek-r1:1.5b (1.1 GB) is DeepSeek-R1 distilled into a 1.5B Qwen model, and the DeepSeek that
-fits on these Chromebooks. It reasons before answering; '--think=false' makes it answer directly.
+fits on every machine the bundle runs on. It reasons before answering; '--think=false' makes it answer directly.
 DeepSeek's current V4 models are about 760B parameters and run only as Ollama cloud models, such as
 deepseek-v4.1-flash:cloud, after 'ollama signin'. They are billed per token.
 
 qwen3.5:4b (3.4 GB) handles text and images, calls tools and can think. It is the chat model of this
 RAG demo. qwen3-embedding:0.6b (639 MB) turns text into vectors for search; it cannot chat.
 
-OLLAMA_EXTRA_MODELS="deepseek-r1:7b" adds models on the next setup run. A 7B model (4.7 GB) loads
-only with nothing else running.
+OLLAMA_EXTRA_MODELS="deepseek-r1:7b" adds models on the next setup run. How large a model fits depends
+on the laptop: the memory ceiling in .wslconfig is the limit.
 EOF
             gen_file "$DIR/docs/flags.md" << 'EOF'
 # Which flag installs what
 
 install-all covers every stack except the opt-in flags: install-models, install-godot-templates,
 install-asm-arm, install-ansible-core, install-db-server, install-oracle-full, install-ldap,
-install-ldap-full, install-ollama-containers, install-lan, install-lan-share, install-com,
-install-retro, install-hermes, install-openclaw, install-elasticsearch, install-milvus,
-install-mongodb-atlas-local and install-cloudflared. Since v89 install-all also runs shared services
+install-ldap-full, install-ollama-containers, install-hermes, install-openclaw, install-elasticsearch,
+install-milvus, install-mongodb-atlas-local and install-cloudflared. Five flags of the Chromebook bundle
+are not yet supported on WSL and are refused or skipped: install-lan, install-lan-share,
+install-android-native, install-com and install-retro. Since v89 install-all also runs shared services
 in Docker through one 'devsvc' command: install-cache (Redis 8, Memcached), install-search (Solr 9.10,
 OpenSearch, Meilisearch, Typesense), install-vector (Qdrant, and sqlite-vec for sqlite3) and
 install-mongodb (MongoDB 8 with mongosh and Compass). Only Redis and Memcached start with Linux; the
 others start with 'devsvc up NAME'. install-cloud gains install-cloudflare (wrangler), and
 install-agentic gains FastMCP's CLI and the MCP Inspector. install-k8s installs kubectl, helm, kind and k9s.
-install-com sets up COM development under Wine and install-retro DOS and old Windows (DOSBox-X for
-Windows 3.1 and 95, QEMU for NT 4.0 and 2000, a Wine prefix for Delphi 1, Open Watcom). install-hermes and install-openclaw install the personal agents Hermes Agent and OpenClaw;
-they need a model with a 64K-token context, so a cloud key or a bigger machine's Ollama. install-lan gives every laptop an address book and the 'lan' command;
-install-lan-share lets this one share Ollama, the databases, LDAP, DDEV sites and dev servers.
+install-hermes and install-openclaw install the personal agents Hermes Agent and OpenClaw;
+they need a model with a 64K-token context, so a cloud key or a bigger machine's Ollama.
 install-ldap runs lldap, a small LDAP directory in Docker; install-ldap-full adds OpenLDAP (slapd).
 install-db-server installs the database servers: SQL Server 2025 and Oracle 26ai Free in Docker
 (install-mssql, install-oracle) and Embarcadero InterBase (install-interbase). install-oracle-full
@@ -3233,7 +3238,7 @@ kind get clusters 2> /dev/null | grep -qx devdemo || kind create cluster --name 
 kubectl config use-context kind-devdemo > /dev/null
 demo_step "helm install podinfo"
 helm upgrade --install podinfo ./chart/podinfo --set replicaCount=2 \
-    --set ui.message="Hello from kind on a Chromebook" --wait --timeout 5m || exit 1
+    --set ui.message="Hello from kind on WSL" --wait --timeout 5m || exit 1
 kubectl get pods -l app.kubernetes.io/name=podinfo -o wide
 demo_bg port-forward kubectl port-forward svc/podinfo 9898:9898
 demo_wait_port 9898 60 && demo_open http://localhost:9898
@@ -3263,7 +3268,7 @@ provider "docker" {}
 
 variable "message" {
   type    = string
-  default = "Deployed by Terraform on a Chromebook"
+  default = "Deployed by Terraform on WSL"
 }
 
 resource "docker_image" "nginx" {
@@ -3334,7 +3339,7 @@ EOF
 EOF
     gen_file "$DIR/roles/web/defaults/main.yml" << 'EOF'
 ---
-web_message: Configured by Ansible on a Chromebook
+web_message: Configured by Ansible on WSL
 EOF
     gen_file "$DIR/roles/web/tasks/main.yml" << 'EOF'
 ---
@@ -3964,12 +3969,12 @@ write_index() {
     {
         echo "# dev-demo"
         echo
-        echo "Hands-on demos for the Chromebook dev environment, downloaded by \`dev-demo-wsl.sh\` (v$VERSION)."
+        echo "Hands-on demos for the Debian on WSL2 dev environment, downloaded by \`dev-demo-wsl.sh\` (v$VERSION)."
         echo "Each folder is a stack; start a demo with its \`run-*.sh\` launcher (from any terminal). Launchers"
         echo "that take a menu also accept the item as an argument, e.g. \`rust/run-ratatui.sh demo2\`; those"
         echo "that leave something running (DDEV, kind, Terraform, Ansible) take \`down\`."
         echo
-        echo "One heavy demo at a time: Linux gets ~6.4 GB of the 8 GB. Heavy: Gemma, the local models (RAG,"
+        echo "One heavy demo at a time: Linux has up to the memory ceiling in .wslconfig. Heavy: Gemma, the local models (RAG,"
         echo "compare), the Drupal RAG site, Langfuse, SQL Server, Oracle, kind, the Android and Tauri builds. Background logs: \`~/.cache/dev-demo/logs\`."
         for f in "$DEMO_ROOT"/.index/*--*; do
             [ -e "$f" ] || continue
@@ -5431,12 +5436,13 @@ OFFLINE_EOF
     gen_file "$DIR/skills/dev-bundle/SKILL.md" << 'SKILL_EOF'
 ---
 name: dev-bundle
-description: Answer questions about this Chromebook's dev-setup bundle - which stacks and demos are installed, and the helper commands it adds (lan, devdb, mssql, oracle, ldap, win31, wine-com, ollama-remote). Use when asked what is installed here, how to start a demo or a database, or how the laptops share services.
+description: Answer questions about this laptop's dev-setup bundle (Debian on WSL2) - which stacks and demos are installed, and the helper commands it adds (devdb, mssql, oracle, ldap, ollama-remote). Use when asked what is installed here, or how to start a demo or a database.
 ---
 
-# The dev-setup bundle on this Chromebook
+# The dev-setup bundle on this laptop (Debian on WSL2)
 
-This Linux container was provisioned by a versioned bundle of four scripts (setup, init, test, demo).
+This Debian distro on WSL2 was provisioned by a versioned bundle of five scripts: a host script that runs
+first on Windows, then setup, init, test and demo inside Linux.
 Look before you change anything, and ask before you start, stop or install something.
 
 ## Where to look
@@ -5445,16 +5451,13 @@ Look before you change anything, and ask before you start, stop or install somet
 - The shell setup the bundle writes: the marked `# >>> dev-setup ... >>>` blocks in `~/.bashrc`.
 
 ## Helper commands (each explains itself with `help` or no arguments)
-- `lan` - the laptop network: `lan status`, `lan scan`, `lan url NAME`, `lan share status`.
 - `devdb`, `mssql`, `oracle` - the SQL Server and Oracle containers: `mssql up`, `mssql sql`, `mssql down`.
 - `ldap` - the LDAP directories: `ldap status`.
-- `win31` - Windows 3.1x in DOSBox-X: `win31 where`.
-- `wine-com` - runs a program in the COM Wine prefix.
 - `ollama` (this machine), `ollama-remote` (the machine in OLLAMA_REMOTE).
 
 ## Never
 - Never print, copy, summarise or send the contents of `~/.config/dev-init/secrets.env` or any `.env` file: they hold API keys.
-- Never open a port to the network or change `LAN_SHARE` without being asked.
+- Never open a port to the network without being asked.
 SKILL_EOF
     write_run << 'EOF'
 demo_need hermes install-hermes
@@ -5467,7 +5470,7 @@ while demo_menu "Hermes Agent" \
         "doctor: hermes doctor (what is configured, what is missing)"; do
     case "$DEMO_CHOICE" in
         chat*)    if has_model; then
-                      demo_note "Hermes asks before running a risky command; say no when unsure. Try: what is installed on this Chromebook? (after the skill item)"
+                      demo_note "Hermes asks before running a risky command; say no when unsure. Try: what is installed on this laptop? (after the skill item)"
                       hermes
                   else
                       demo_note "Hermes has no model yet: put a key (AGENT_ANTHROPIC_API_KEY, OPENROUTER_API_KEY) or OLLAMA_REMOTE + AGENT_MODEL in ~/.config/dev-init/secrets.env and rerun dev-init with install-hermes. The offline item works without one."
@@ -5482,7 +5485,7 @@ while demo_menu "Hermes Agent" \
     esac
     [ -n "${1:-}" ] && break
 done
-demo_note "Messaging (Telegram, Discord, Slack...): 'hermes gateway setup', with a bot account made for it. The container sleeps with the Chromebook, so the bot does too."
+demo_note "Messaging (Telegram, Discord, Slack...): 'hermes gateway setup', with a bot account made for it. WSL's VM stops when it is idle or Windows sleeps, so the bot does too."
 EOF
     done_demo
 }
@@ -5611,12 +5614,13 @@ OFFLINE_EOF
     gen_file "$DIR/skills/dev-bundle/SKILL.md" << 'SKILL_EOF'
 ---
 name: dev-bundle
-description: Answer questions about this Chromebook's dev-setup bundle - which stacks and demos are installed, and the helper commands it adds (lan, devdb, mssql, oracle, ldap, win31, wine-com, ollama-remote). Use when asked what is installed here, how to start a demo or a database, or how the laptops share services.
+description: Answer questions about this laptop's dev-setup bundle (Debian on WSL2) - which stacks and demos are installed, and the helper commands it adds (devdb, mssql, oracle, ldap, ollama-remote). Use when asked what is installed here, or how to start a demo or a database.
 ---
 
-# The dev-setup bundle on this Chromebook
+# The dev-setup bundle on this laptop (Debian on WSL2)
 
-This Linux container was provisioned by a versioned bundle of four scripts (setup, init, test, demo).
+This Debian distro on WSL2 was provisioned by a versioned bundle of five scripts: a host script that runs
+first on Windows, then setup, init, test and demo inside Linux.
 Look before you change anything, and ask before you start, stop or install something.
 
 ## Where to look
@@ -5625,16 +5629,13 @@ Look before you change anything, and ask before you start, stop or install somet
 - The shell setup the bundle writes: the marked `# >>> dev-setup ... >>>` blocks in `~/.bashrc`.
 
 ## Helper commands (each explains itself with `help` or no arguments)
-- `lan` - the laptop network: `lan status`, `lan scan`, `lan url NAME`, `lan share status`.
 - `devdb`, `mssql`, `oracle` - the SQL Server and Oracle containers: `mssql up`, `mssql sql`, `mssql down`.
 - `ldap` - the LDAP directories: `ldap status`.
-- `win31` - Windows 3.1x in DOSBox-X: `win31 where`.
-- `wine-com` - runs a program in the COM Wine prefix.
 - `ollama` (this machine), `ollama-remote` (the machine in OLLAMA_REMOTE).
 
 ## Never
 - Never print, copy, summarise or send the contents of `~/.config/dev-init/secrets.env` or any `.env` file: they hold API keys.
-- Never open a port to the network or change `LAN_SHARE` without being asked.
+- Never open a port to the network without being asked.
 SKILL_EOF
     write_run << 'EOF'
 demo_need openclaw install-openclaw
@@ -5682,7 +5683,7 @@ while demo_menu "OpenClaw" \
     esac
     [ -n "${1:-}" ] && break
 done
-demo_note "Channels (Telegram, WhatsApp, Slack...): 'openclaw channels add', with an account made for it. The always-on gateway: 'openclaw gateway install'; the container sleeps with the Chromebook."
+demo_note "Channels (Telegram, WhatsApp, Slack...): 'openclaw channels add', with an account made for it. The always-on gateway: 'openclaw gateway install'; WSL's VM stops when it is idle or Windows sleeps."
 EOF
     done_demo
 }
@@ -7243,7 +7244,7 @@ pause
 if [ "$NONSTOP" = 1 ] || { read -rp "Drop the devdemo_films database now? [Y/n] " a; [ "${a,,}" != n ]; }; then
     js steps/8-drop.js
 else
-    demo_note "Kept: 'devsvc cli mongodb' then 'use devdemo_films'. Compass (ChromeOS launcher) shows it at mongodb://127.0.0.1:27017."
+    demo_note "Kept: 'devsvc cli mongodb' then 'use devdemo_films'. Compass (Windows Start menu) shows it at mongodb://127.0.0.1:27017."
 fi
 EOF
     done_demo
@@ -9277,7 +9278,7 @@ EOF_JSON
     gen_file "$DIR/playwright/playwright.config.ts" << 'EOF_TS'
 import { defineConfig, devices } from '@playwright/test'
 
-// One worker: these Chromebooks give Linux ~6.4 GB. Traces for every test (npx playwright show-trace).
+// One worker: the same setting as on the Chromebooks, where Linux has ~6.4 GB. Traces for every test (npx playwright show-trace).
 export default defineConfig({
   testDir: 'tests',
   workers: 1,
@@ -10608,7 +10609,7 @@ EOF
 # project that pins its own version); Node and wrangler are already there. Ports: dev :4321, the built site's
 # Node server :4322. Images go through <Image> with Drupal's host in image.domains, so the build downloads and
 # resizes them into dist/ and the built site has no links back to :8891. 'deploy' ships only dist/client to
-# Cloudflare: the island needs Drupal, which stays on the Chromebook, so the deployed pages show its fallback.
+# Cloudflare: the island needs Drupal, which stays on this laptop, so the deployed pages show its fallback.
 demo_drupal_astro() {
     begin drupal drupal-astro "Headless Drupal: Umami's recipes over core's JSON:API, built into static pages by Astro 7, with one live server island" \
         "https://docs.astro.build + https://www.drupal.org/docs/core-modules-and-themes/core-modules/jsonapi-module" || return 0
@@ -10828,7 +10829,7 @@ const { r } = Astro.props;
 EOF_ASTRO
     gen_file "$DIR/astro/wrangler.toml" << 'EOF_TOML'
 # 'deploy' in the launcher: dist/client only, as static assets on Cloudflare. The server island needs Drupal, which
-# stays on the Chromebook, so the deployed pages show its fallback.
+# stays on this laptop, so the deployed pages show its fallback.
 name = "devdemo-umami-astro"
 compatibility_date = "2026-10-01"
 
@@ -10918,7 +10919,7 @@ for r in json.load(sys.stdin)["data"]:
                       echo "Not logged in to Cloudflare: set CLOUDFLARE_API_TOKEN (and CLOUDFLARE_ACCOUNT_ID) in"
                       echo "~/.config/dev-init/secrets.env, or run 'wrangler login'. Then try again."; continue
                   fi
-                  demo_note "Only dist/client goes up: Drupal stays on this Chromebook, so the deployed pages show the island's fallback."
+                  demo_note "Only dist/client goes up: Drupal stays on this laptop, so the deployed pages show the island's fallback."
                   read -rp "Deploy dist/client as the Worker 'devdemo-umami-astro' (static assets) to your Cloudflare account? [y/N] " a
                   [ "${a,,}" = y ] || continue
                   ( cd astro && wrangler deploy ) && demo_note "Deployed. Remove it later: wrangler delete devdemo-umami-astro" ;;

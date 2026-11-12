@@ -650,7 +650,7 @@ stage_expect install-hermes install-hermes
 stage_expect install-openclaw install-openclaw
 stage_expect finalize
 
-echo "Starting comprehensive Chromebook Linux provisioning (Version 1)..."
+echo "Starting comprehensive Debian on WSL2 provisioning (Version 1)..."
 
 stage network
 mkdir -p "$ASSETS/logs" "$ASSETS/downloads"
@@ -5207,9 +5207,10 @@ if [[ "$FLAGS" =~ " install-mssql " ]] || [[ "$FLAGS" =~ " install-oracle " ]]; 
             free_gb=$(disk_free_gb)
             if [ "${free_gb:-0}" -lt $(( est + DB_MIN_FREE_GB )) ]; then
                 echo "NOTICE: skipping $img (about $est GB on disk): ${free_gb:-0} GB free, and DEV_DB_MIN_FREE_GB=$DB_MIN_FREE_GB should stay free."
-                echo "        Give Linux more disk (ChromeOS Settings > About ChromeOS > Linux development environment > Disk size), then rerun,"
+                # v1: the figure is the smaller of the Linux disk's and the Windows drive's (Q25), so the message names both sides.
+                echo "        Free space in Linux ('devclean') or on the Windows drive that holds this distro's disk (docs/wsl-gotchas.md), then rerun,"
                 echo "        or keep less free: DEV_DB_MIN_FREE_GB=<n> ./$(basename "$0") install-$engine"
-                db_skipped "$engine" "disk: ${free_gb:-0} GB free, $(( est + DB_MIN_FREE_GB )) GB needed ($img about $est GB + DEV_DB_MIN_FREE_GB=$DB_MIN_FREE_GB). Resize the Linux disk, or rerun with DEV_DB_MIN_FREE_GB=<n> install-$engine"
+                db_skipped "$engine" "disk: ${free_gb:-0} GB free, $(( est + DB_MIN_FREE_GB )) GB needed ($img about $est GB + DEV_DB_MIN_FREE_GB=$DB_MIN_FREE_GB). Free space in Linux or on the Windows drive, or rerun with DEV_DB_MIN_FREE_GB=<n> install-$engine"
                 return 1
             fi
             echo "Pulling $img (about $est GB on disk; a few minutes)..."
@@ -7922,7 +7923,8 @@ EOF
     if [ -f "$OLLAMA_CONTAINERS_CONF" ]; then
         echo "Containers reach Ollama at http://host.docker.internal:11434 ($OLLAMA_CONTAINERS_CONF; the comment in it says how to undo it)."
     fi
-    echo "CPU-only in Crostini. Any library model runs:  ollama run deepseek-r1:1.5b"
+    # v1: per machine. Ollama uses CUDA where WSL exposes an NVIDIA GPU (d1) and the CPU elsewhere (Q5).
+    echo "Runs on the CPU, or with CUDA on a laptop whose NVIDIA GPU WSL exposes. Any library model runs:  ollama run deepseek-r1:1.5b"
     echo "Curated models for this machine: rerun with install-models. A bigger machine's Ollama: OLLAMA_REMOTE in"
     echo "secrets.env, then 'ollama-remote run <model>'. Cloud models (pay per token, e.g. deepseek-v4.1-flash:cloud):"
     echo "'ollama signin' once, then 'ollama run <model>:cloud'."
@@ -8198,7 +8200,7 @@ EOF
     echo "================================================================="
     echo "Gemma 4 Setup Complete!"
     echo "The lightweight ${GEMMA_MODEL} model has been pulled into Ollama"
-    echo "(chosen for 8GB RAM; larger variants like gemma4:e4b may freeze this Chromebook)."
+    echo "(the Chromebooks' choice for 8 GB of RAM, kept in v1; larger variants like gemma4:e4b need more memory)."
     echo "Optional cloud route: set GEMINI_API_KEY in ~/.config/dev-init/secrets.env, then run dev-init with install-gemma."
     echo "Local models work without a Google key."
     echo ""
@@ -8291,7 +8293,7 @@ if [[ "$FLAGS" =~ " install-models " ]]; then
         if [ "$need_b" -gt 0 ]; then size_txt="$(( need_b / 1024 / 1024 )) MB"; else size_txt="size unknown"; fi
         if [ "$left_gb" -lt "$MIN_FREE_GB" ]; then
             echo "NOTICE: skipping $m ($size_txt): it would leave ${left_gb} GB free, under DEV_MODELS_MIN_FREE_GB=$MIN_FREE_GB."
-            echo "        Give Linux more disk (ChromeOS Settings > About ChromeOS > Linux development environment > Disk size),"
+            echo "        Free space in Linux ('devclean') or on the Windows drive that holds this distro's disk (docs/wsl-gotchas.md),"
             echo "        remove a model you no longer use ('ollama rm <model>'), or rerun with DEV_MODELS_MIN_FREE_GB=<lower>."
             stage_skip "disk: curated model $m"
             SKIPPED_MODELS+=("$m (disk)")
@@ -13437,6 +13439,11 @@ fi
 # before a risky command; OpenClaw runs commands without asking by default, so dev-init sets its
 # tools.exec.mode to ask. Connect throwaway bot accounts and install only skills you have read. The
 # Linux container stops when the Chromebook sleeps, so an agent here is not reachable around the clock.
+# v1 (WSL): three things in the note above read differently here. The local models are still set up as on
+# the 8 GB Chromebooks (Q30), so the agents still get a cloud key or a bigger machine's Ollama. sudo is
+# passwordless through the host script's drop-in, not through Crostini. And it is WSL's VM that stops: when
+# it has been idle, and when Windows sleeps or shuts down. So an agent here is still not reachable around
+# the clock (Q33: what happens is observed on the first run and written up in docs/wsl-gotchas.md).
 # =================================================================
 if [[ "$FLAGS" =~ " install-hermes " ]]; then
     stage install-hermes
@@ -13592,7 +13599,7 @@ if [[ "$FLAGS" =~ " install-mssql " ]] || [[ "$FLAGS" =~ " install-oracle " ]]; 
         echo "-  Database servers created but stopped (${DB_MADE[*]}). One at a time (each holds ~2 GB): 'mssql up' / 'oracle up',"
         echo "   then 'mssql sql' / 'oracle sql'; 'mssql down' / 'oracle down' gives the memory back."
     fi
-    [ "$DB_MISSING" = 1 ] && echo "   Disk: ChromeOS Settings > About ChromeOS > Linux development environment > Disk size."
+    [ "$DB_MISSING" = 1 ] && echo "   Disk: free space in Linux ('devclean') or on the Windows drive that holds this distro's disk (docs/wsl-gotchas.md)."
 fi
 if [ -x "$HOME/.local/bin/devsvc" ]; then
     echo "-  Shared services: 'devsvc status' lists them. Those in DEVSVC_AUTOSTART (default Redis, Memcached) run;"
@@ -13646,7 +13653,7 @@ if [[ "$FLAGS" =~ " install-retro " ]]; then
 fi
 if [[ "$FLAGS" =~ " install-hermes " ]] || [[ "$FLAGS" =~ " install-openclaw " ]]; then
     echo "-  Personal agents: dev-init gives Hermes / OpenClaw a model from secrets.env (AGENT_ANTHROPIC_API_KEY, OPENROUTER_API_KEY or OLLAMA_REMOTE:"
-    echo "   they need a 64K-token context, more than an 8 GB Chromebook holds). Then 'hermes' or 'openclaw chat'."
+    echo "   they need a 64K-token context, more than the bundle's local models are set up for). Then 'hermes' or 'openclaw chat'."
     echo "   Channels and gateway services stay manual; connect throwaway bot accounts, not your own."
 fi
 if [[ "$FLAGS" =~ " install-lan-share " ]]; then
