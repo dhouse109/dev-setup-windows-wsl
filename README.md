@@ -134,6 +134,9 @@ ceiling (`.wslconfig`) is higher on these laptops.
 | `dev-host-wsl.ps1` | The Windows host script. Runs first, on Windows |
 | `dev-setup-wsl.sh`, `dev-init-wsl.sh`, `dev-test-wsl.sh`, `dev-demo-wsl.sh` | The four bash scripts. They run inside the Debian WSL distro |
 | [CHANGELOG.md](CHANGELOG.md) | Every version, one section per script |
+| [docs/init-checklist.md](docs/init-checklist.md) | The run order, every flag, the secrets file and the manual steps |
+| [docs/dev-demo.md](docs/dev-demo.md) | The demos and their disk footprint |
+| [docs/wsl-gotchas.md](docs/wsl-gotchas.md) | How Debian on WSL2 differs from a Chromebook's Linux, and what the bundle does about it |
 | [docs/plans/wsl-plan.md](docs/plans/wsl-plan.md) | The plan: decisions so far, the WSL compatibility review, open questions, suggested sequence |
 | [docs/plans/v1-plan.md](docs/plans/v1-plan.md) | The v1 build spec, the first-run protocol and the acceptance criteria |
 | [reference/dev-setup-chromebook/](reference/dev-setup-chromebook/) | Read-only copy of Chromebook v101, the fork source |

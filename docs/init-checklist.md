@@ -1,0 +1,905 @@
+# Init checklist
+
+> **dev-setup-windows-wsl v1.** This checklist is forked from dev-setup-chromebook v101's, with the WSL
+> edits made where they apply. v1 is built, not yet confirmed run in WSL.
+>
+> - **The Windows host script runs first** (`dev-host-wsl.ps1`), and one step in the middle of it is yours:
+>   creating the Linux user. See Run order.
+> - **Five flags are not yet supported on WSL:** install-lan, install-lan-share, install-android-native,
+>   install-retro and install-com. Their sections are kept below under a one-line "Not in v1" note, as
+>   their code is kept in the scripts, for when they are ported.
+> - Where a paragraph says "v96", "Oct 26 2026" and the like, it is the Chromebook bundle's history.
+> - What differs under WSL, and why, is in [wsl-gotchas.md](wsl-gotchas.md).
+
+v99 keeps the same flags and run order. During each bundle invocation, pip/pipx inherit retry and
+socket-timeout settings; setup writes apt's managed acquisition policy before installing packages.
+These settings require no keys. Bulk-install retries use three attempts with 2s/5s backoff.
+Setup reports failed/not-reached stages and rerun flags in its closing summary and
+`assets/logs/setup-stages-<timestamp>.tsv` (`assets/setup-stages.tsv` is the latest run). Exhausted
+optional bulk retries skip their block and continue; unexpected errors abort with an EXIT report.
+Failed requested stages make setup exit nonzero. Deliberate disk/media/credential skips stay separate. Playwright's managed installer/lockfile and successful release record live in
+`assets/tools/playwright`; dev-test uses that release instead of resolving latest again. Apt counts
+repeated delayed-item warnings, preserving other diagnostics and exit status. `REDIS_INSIGHT=0` and
+`MONGODB_COMPASS=0` deliberately disable those GUIs; use the same setting for setup and dev-test.
+The qwen disk guard is unchanged; generation examples only name confirmed present completion models.
+Optional GEMINI_API_KEY stays in secrets.env and is applied by init, never entered directly in .bashrc.
+
+Nov 1 acceptance follow-up: vendor downloads retry, fetched installers execute once, and failed
+system apt updates abort. Playwright's dependency pipeline retries before browsers/version recording.
+Reqnroll scratch tests select the SDK's major/minor framework and require that runtime. Retro uses
+`/usr/sbin/mkfs.fat`, independent of user PATH. Symfony logs the complete security result and checker
+status. Inspector setup runs a real npx tool call and verifies the same call offline; failure is a
+NOTICE with full diagnostics in `assets/logs/inspector-cache-*`, not a claim that the cache is warm.
+v101 supersedes the old cache claim: dev-test verifies the exact installed global Inspector release,
+its matching Node/npm prefix, producer exit 0 and result 5. Registry packument key presence from
+`npm cache ls` is INFO only (present/absent/unknown); it does not verify cached bodies or server
+Python dependencies. The owner confirmed `devclean --run` preceded the historical ENOTCACHED.
+Devclean keeps clearing npm's disposable metadata; its report and successful cleanup explain that
+npx tools need one online use afterward to work offline again. No strict-offline npx/FastMCP UI
+promise is made in v101. No new flags, secret variables or login steps are required.
+
+Shell-startup probes supervise and stop only their descendant ssh-agents. Their PID/start-time ledger
+is `assets/logs/shell-agents-<timestamp>.tsv`; dev-test checks it before its summary and again on EXIT.
+A pre-existing user agent is left alone. Failed service starts retain complete output/container logs
+in `assets/logs/devsvc-<service>-<timestamp>.startup.log`, including safe image/state/limit fields.
+Typesense's exit-139 investigation identified upstream #2998 (missing kernel `/proc/self/io`); setup now uses a scoped read-only preload shim only on affected hosts, with zero process-I/O counters and an explicit diagnostic. With approval, run
+`bash tests/typesense-investigate.sh` to collect full startup logs and image/host metadata under
+`assets/logs/typesense-investigation-<timestamp>`; do not upload raw logs or credential arguments.
+Targeted test commands also need individual approval; the owner performs final full acceptance. With approval,
+`python3 -B tests/refresh-retro-helper.py` refreshes only the installed helper after syntax checks,
+keeping a backup under assets/downloads/helper-backups. `python3 -B tests/warm-inspector-cache.py`
+replays only setup's real online/offline Inspector probe with managed nvm activated. Neither command
+runs the full installer; the cache probe's server starts only when executed directly or by FastMCP.
+
+The owner accepted full v99 setup → init → dev-test on Nov 1 2026 with
+`install-all install-db-server install-lan-share install-models install-ollama-containers install-retro`:
+PASS 594, FAIL 0, WARN 11, SKIP 1. The owner confirms init was run in between and dev-test returned to
+the prompt without Ctrl+C. Two non-credential WARNs are accepted Known issues: pre-existing offline
+Inspector cache availability and environmental disk headroom below the model reserve. The reserve
+stays unchanged. Read resulting .output/.log files by path; agent-run bundle commands still need approval.
+
+*Working notes kept alongside the scripts, copied at the v93 release, updated for v95. The "since vNN" remarks date each behaviour; [CHANGELOG.md](../CHANGELOG.md) has the full story.*
+
+## Run order
+
+Run init once before setup to get the secrets template, fill it while setup downloads, then run init again after setup. Only the first init run is safe before setup; the second needs the tools setup installs (`gh`, `hf`, `adb`, `eas`, `claude`, `codex`, `gemini`, `aws`, `az`, `gcloud`, `ng`, `dotnet`, `vercel`, `terminus`, `acli`). All three scripts take the same flags and are versioned as one bundle (v94 as of this doc).
+
+0. **On Windows, before anything else:** `powershell -ExecutionPolicy Bypass -File .\dev-host-wsl.ps1`. It enables WSL, writes `.wslconfig` and installs Debian, then stops: open Debian once, create the Linux user (a name and a password), `exit`, and run the script again. The second run writes `/etc/wsl.conf` (systemd on, the Windows PATH kept out) and the sudoers drop-in, installs `sudo`, `git` and `ca-certificates` if the image lacks them, sets up mkcert on Windows and prints a summary. Then open a **new** terminal, start Debian and clone the repo into the Linux home, never under `/mnt`.
+1. `./dev-init-wsl.sh install-all` — writes `~/.config/dev-init/secrets.env` and exits.
+2. Fill in the keys (sections below). Filling in the file logs nothing in by itself; step 5 applies it.
+3. `./dev-setup-wsl.sh install-all` — 30–60 minutes of downloads, fully unattended since v68; see Running setup.
+4. `source ~/.bashrc`
+5. `./dev-init-wsl.sh install-all` — applies the keys, logs in (GitHub, Hugging Face, cloud CLIs, Vercel), uploads the SSH key.
+6. `./dev-test-wsl.sh install-all` — verifies every component and every login. Run before step 5 it still works, but reports each login as a WARN and says init is pending.
+7. Work through the GUI first-run list that init prints at the end.
+
+Running init early by mistake does no damage: steps fail or skip, and rerunning after setup applies them, since every step is idempotent. Add `noninteractive` to skip any login prompt you did not supply a token for. An existing `secrets.env` is upgraded in place: init appends the sections a newer version added when they are missing (AWS / Azure / Google Cloud in v57, Vercel and Jev in v67, the machine label and Drupal hosting tokens in v68), so don't delete the file; run init once after updating the scripts to get them.
+
+## Running setup
+
+Setup installs and asks for nothing. Run it from the Linux terminal, in the directory holding the scripts.
+
+### Before the first run
+
+- Windows 11 22H2 or later, x64. Run `dev-host-wsl.ps1` on Windows first (Run order, step 0): it sets WSL's memory ceiling and swap in `.wslconfig`, installs Debian 13, and prepares the distro. Setup's preflight stops, with the fix named, if that was skipped: systemd not running, a Windows directory on `PATH`, `sudo` asking for a password, the bundle under `/mnt`, CRLF line endings, running as root, or Docker Desktop's WSL integration on for this distro.
+- Clone the repository into a folder of its own in the Linux home (never under `/mnt/c` or any `/mnt/*` path) (the scripts create an `assets` folder next to themselves). The version history is CHANGELOG.md, beside the scripts.
+- Since v65 the scripts keep what they generate in an `assets` folder next to themselves, not loose in the home directory: test logs in `assets/logs`, installer downloads in `assets/downloads` (emptied after install), and `assets/gemma_client.py`. Drop the Antigravity `.tar.gz` bundle in `assets` too. Since v97 setup and test also save their screen output there, as plain text: `assets/logs/dev-setup-<date-time>.output` and `dev-test-<date-time>.output`, from the first line to the summary, with no color codes or progress-bar redraws and no runs of blank lines, ready to upload (the test's `.log` has the same date-time; the summary lists both, as "Screen output:"). Run from a terminal, the script starts itself again inside util-linux's `script`, so the screen looks as before; piped (`… 2>&1 | tee FILE` still works) it records through the pipe; after Ctrl-C the file keeps what was printed, and the terminal says "Screen output (stopped before the summary)". `DEV_SCREEN_SAVE=0` turns it off. The test script moves older `~/dev-test-*.log` and `.output` files into `assets/logs` on start, and setup with install-gemma adds a gemma command to \~/.bashrc that runs the client with its venv (open a new terminal, then type gemma) and clears the old `~/gemma_client.py`. Tool dot-directories and the `~/lakehouse` and `~/agentic` workspaces stay where they are.
+- Setup never asks for a password: the host script wrote a NOPASSWD drop-in, `/etc/sudoers.d/dev-bundle`, and the Linux account keeps its password (the scripts stop on anything but Debian on WSL2 unless `DEV_BUNDLE_ANY_HOST=1`, which is never needed on the laptops). `set -e` means any failure aborts; rerunning is safe, every block is idempotent.
+
+### Flags
+
+The same expansion is used by all three scripts, so a flag set that installs is the flag set that tests and initializes.
+
+| Flag | Installs |
+| --- | --- |
+| *(none)* | Base: apt packages (tmux among them since v95), pipx and uv, SSH key, Docker, Homebrew with ddev/gh/mkcert (DDEV telemetry off since v96), Chrome |
+| `install-all` | Every category below |
+| `install-editors` | vscode, windsurf (now Devin Desktop; on X11 since v96), cursor, lazarus (since v94 the IDE is rebuilt on Qt5, in light and dark profiles with docked and floating layouts) |
+| `install-languages` | rust, node, go, pwsh, ruby, cpp, asm, dotnet, java |
+| `install-ecosystems` | antigravity, media, gemma (pulls in install-ollama), mobile, android-native, godot |
+| `install-godot` | Godot standard (GDScript) and .NET (C#) editors side by side, godot and godot-mono launchers, app-drawer entries; pulls in install-dotnet (v66, part of install-ecosystems) |
+| `install-godot-templates` | Godot export templates for both editors, about 2.5 GB to download; opt-in only, not part of install-all (v66) |
+| `install-ollama` | The Ollama server (moved out of install-gemma; install-gemma, install-models and install-ollama-containers pull it in) with a systemd drop-in: 15-minute load timeout, at most two models loaded (Ollama adds the second only when both fit), one request per model, 8K context with flash attention and a q8\_0 KV cache; OLLAMA\_API\_BASE for aider and the ollama-remote wrapper in \~/.bashrc. Ollama's installer, which downloads the whole bundle, is skipped when the latest release is already installed (OLLAMA\_REINSTALL=1 forces it). CUDA where WSL exposes an NVIDIA GPU, the CPU elsewhere (v77, part of install-all through install-gemma) |
+| `install-models` | deepseek-r1:1.5b, qwen3.5:4b and qwen3-embedding:0.6b, about 5 GB; OLLAMA\_EXTRA\_MODELS adds more (pass it on every run, or the recorded list drops them). Skips a pull that would leave under DEV\_MODELS\_MIN\_FREE\_GB (default 10 GB, or 15% of the Linux disk when that is less, since v92) free; never pulls :cloud tags. Pulls in install-ollama; opt-in only, not part of install-all (v77) |
+| `install-ollama-containers` | A second Ollama drop-in with OLLAMA\_HOST=0.0.0.0:11434, so Docker containers (DDEV's web container, for a Drupal AI site) reach Ollama at http://host.docker.internal:11434. Local clients are unaffected, and under WSL's default NAT networking the port is not offered to the network (to confirm on the first run). Later runs without the flag keep it; undo by deleting dev-setup-containers.conf and restarting Ollama. Pulls in install-ollama; opt-in only, not part of install-all (v80) |
+| `install-mobile` | tauri, rn, flutter; pulls in rust and node automatically |
+| `install-db`, `install-db-extra` | MSSQL, Paradox and Lazarus client libs, Firebird 4 with its embedded engine (isql-fb, gbak; v80); SQLite, PostgreSQL, MariaDB, DuckDB 1.5.6 ODBC (same pin as the lakehouse CLI/Python; v98) |
+| `install-interbase` | Embarcadero InterBase from the download you put in assets: silent install into /opt/interbase, instance gds\_db on port 3050. Its tools stay off PATH (ib-isql, ib-gbak, ib-mgr in \~/.bashrc) and libgds.so off the library path, so a Lazarus program picks InterBase or Firebird with a TSQLDBLibraryLoader. The Developer Edition needs registering before its server starts: init does that. Opt-in only, not part of install-all (v80); part of install-db-server since v82. A zip is unpacked into assets/downloads/interbase, kept if the install fails (setup prints the console-mode command for it) and removed once InterBase is installed (v81) |
+| `install-db-server` | The database servers: install-mssql, install-oracle and install-interbase. Opt-in only, not part of install-all: the two container images are about 3 GB each, and a pull is skipped when it would leave under DEV\_DB\_MIN\_FREE\_GB (default 10 GB, or 15% of the Linux disk when that is less, since v92) free; the reason is kept in \~/.config/devdb/\<engine>.skipped, and setup's summary, init and test quote it. Each engine holds about 2 GB while it runs, so the containers are created stopped and the mssql and oracle commands start one at a time (v82) |
+| `install-mssql` | SQL Server 2025 Developer in Docker: container devdb-mssql on 127.0.0.1:1433, login sa, data in the volume devdb-mssql-data, capped at MSSQL\_MEMORY\_MB (default and minimum 2048). Plus the Go sqlcmd and ODBC Driver 18. A rerun recreates the container on a newer image (DB\_SERVER\_RECREATE=1 forces it) and keeps the volume (v82, part of install-db-server) |
+| `install-oracle` | Oracle AI Database 26ai Free (Lite image) in Docker: container devdb-oracle on 127.0.0.1:1521, service FREEPDB1, login system, data in the volume devdb-oracle-data. Plus SQLcl as sql (with the JDK install-java uses) and Instant Client with its ODBC driver, registered as Oracle ODBC. A newer image is not applied on its own, since that upgrades the database: setup says how, and DB\_SERVER\_RECREATE=1 does it (v82, part of install-db-server) |
+| `install-oracle-full` | install-oracle on Oracle's full image (about 3.6 GB to download, 9.5 GB on disk, against 1.8 GB for Lite), for the optional database components Lite leaves out. Its data lives in its own volume, devdb-oracle-full-data: moving from Lite starts an empty database with the same password and leaves the Lite one in devdb-oracle-data. Remembered: later runs with plain install-oracle or install-db-server keep it on full. Back to Lite: docker rm -f devdb-oracle, then setup with install-oracle. Opt-in, in no group (v83) |
+| `install-ldap` | LDAP, the lite directory: lldap in Docker, container devldap-lldap on 127.0.0.1:3890 with a web UI on 127.0.0.1:17170, data in the volume devldap-lldap-data. It runs all the time (about 20 MB of RAM) and joins DDEV's network as lldap, so Drupal in DDEV reaches ldap://lldap:3890. Base DN dc=example,dc=com unless LDAP\_BASE\_DN says otherwise; people alice, bob, carol, groups drupal\_editors and drupal\_admins, and the read-only service account uid=drupal-bind. Plus ldap-utils, php-ldap and the ldap command (status, up, down, search, login, passwords, drupal, ui, logs). Opt-in, in no group (v83) |
+| `install-ldap-full` | OpenLDAP itself, Debian's slapd, a systemd service on port 389 with the whole protocol (ldapadd/ldapmodify, schemas, overlays, cn=config), admin cn=admin,\<base DN>, the same people and groups; reached from DDEV as ldap://host.docker.internal:389. Includes install-ldap, so lldap runs next to it. A slapd serving another suffix is reconfigured (Debian moves the old database to /var/backups). Opt-in, in no group (v83) |
+| `install-lan` | **Not in v1** (not yet supported on WSL). On the Chromebooks: Using the other laptops: the address book LAN\_HOSTS from secrets.env goes into /etc/hosts (this machine's own name maps to 127.0.0.1), so every tool takes the laptop names, plus the lan command (status, hosts, ip, scan, url, ollama, mcp, site, share; 'lan help'). Since v93 also Tailscale, installed in normal mode (tailscale0; dev-init joins the laptop), NAME.internal beside each name in /etc/hosts, and 'lan probe' / 'lan path'. Opt-in, in no group (v84) |
+| `install-lan-share` | **Not in v1** (not yet supported on WSL). On the Chromebooks: Serving the other laptops; includes install-lan. LAN\_SHARE picks what is shared (ollama mssql oracle ldap ddev dev mcp, and since v89 redis solr opensearch elasticsearch meilisearch typesense qdrant mongodb; empty = nothing; redis, qdrant and mongodb only with their login set, Memcached, Milvus, Atlas Local and (v91) the Selenium Grid never). A relay, dev-lan-relay.service, listens on this Linux's network address and passes connections to 127.0.0.1, so no service changes and 'lan share off' closes every port at once. Network ports: Ollama 11434, SQL Server 1433, Oracle 1521, lldap 3890 and 17170, OpenLDAP 1389, DDEV 8080 and 8443. Dev and MCP servers listen on the network themselves (--host, host="0.0.0.0"). Since v93, over Tailscale: 'tailscale serve' publishes the LAN\_SHARE ports to your tailnet only, and the relay stays off; LAN\_TAILSCALE=0 keeps the relay, where each port needs a ChromeOS port forward ('lan share ports'). Opt-in, in no group (v84) |
+| `install-cache` | The caches, install-redis and install-memcached, as shared Docker containers run by the devsvc command (status, up, down, info, cli, password, logs, ddev, fits; 'devsvc help'). Every devsvc service listens on 127.0.0.1 only, joins DDEV's network under its DDEV name while it runs, and is checked against a memory budget (DEVSVC\_RAM\_MB) before it starts. In install-all (v89) |
+| `install-redis` | Redis 8 (search, JSON, time series and Bloom built in) in Docker: container devsvc-redis on 127.0.0.1:6379, DDEV name devredis, data in the volume devsvc-redis-data, maxmemory 256mb. Starts with Linux (DEVSVC\_AUTOSTART); REDIS\_PASSWORD sets a login. Plus redis-tools (redis-cli) and Redis Insight (REDIS\_INSIGHT=0 skips it). Part of install-cache (v89) |
+| `install-memcached` | Memcached 1.6 in Docker on 127.0.0.1:11211, DDEV name devmemcached, 64 MB, no login and no volume. Starts with Linux. Part of install-cache (v89) |
+| `install-search` | The search engines: install-solr, install-opensearch, install-meilisearch and install-typesense, created stopped ('devsvc up NAME' starts one). The heavy engines (Solr, OpenSearch, Elasticsearch, Milvus, Atlas Local; since v91 the Selenium Grid) run one at a time and stop SQL Server or Oracle when they start. Logins are generated on the first run and kept ('devsvc password NAME'). In install-all (v89) |
+| `install-solr`, `install-opensearch`, `install-meilisearch`, `install-typesense` | Solr 9.10 in SolrCloud mode on 127.0.0.1:8983 (devsolr, user solr, 512 MB heap); OpenSearch 3 on 127.0.0.1:9200 (devopensearch, user admin, 512 MB heap, plain HTTP); Meilisearch v1 on 127.0.0.1:7700 (devmeili, master key); Typesense 30 on 127.0.0.1:8108 (devtypesense, API key). Part of install-search (v89) |
+| `install-elasticsearch` | Elasticsearch 9 on 127.0.0.1:9201 (9200 is OpenSearch's), DDEV name develastic, user elastic, plain HTTP, machine learning off; a heavy engine. Opt-in, in no group (v89) |
+| `install-vector` | install-qdrant plus sqlite-vec, the vector extension for Debian's sqlite3 and Python, in \~/.local/lib/sqlite-vec (SQLITE\_VEC in \~/.bashrc). In install-all (v89) |
+| `install-qdrant` | Qdrant v1 on 127.0.0.1:6333 (REST) and 6334 (gRPC), DDEV name devqdrant, telemetry off; QDRANT\_API\_KEY sets a login. Part of install-vector (v89) |
+| `install-milvus` | Milvus v3 standalone (embedded etcd, local storage) on 127.0.0.1:19530 with its WebUI on 9091, DDEV name devmilvus, no login; a heavy engine. Opt-in, in no group (v89) |
+| `install-mongodb` | MongoDB 8 on 127.0.0.1:27017, DDEV name devmongo, WiredTiger cache 0.5 GB; MONGO\_ROOT\_PASSWORD turns on auth. Plus mongosh, the Database Tools (mongoimport, mongoexport, mongodump) and Compass (MONGODB\_COMPASS=0 skips it); install-web adds php-mongodb. In install-all (v89) |
+| `install-mongodb-atlas-local` | MongoDB Atlas Local (Atlas Search and Vector Search; about 2.5 GB of RAM) on 127.0.0.1:27018, DDEV name devmongo-atlas, plus the Atlas CLI; a heavy engine. Pulls in install-mongodb. Opt-in, in no group (v89) |
+| `install-lakehouse` | DuckDB 1.5.6 CLI/Python with the Iceberg, DuckLake and Delta Lake extensions; delta-rs (deltalake); dbt Fusion, dbt Core v1 (<2) |
+| `install-agentic` | Temporal, LangGraph, Langfuse compose; FastMCP's CLI and the MCP Inspector (v89) |
+| `install-cloud` | aws, azure, gcp CLIs (v57), vercel CLI (v67), Cloudflare's wrangler (v89) |
+| `install-vercel` | Vercel CLI with telemetry off; pulls in install-node (v67, part of install-cloud) |
+| `install-cloudflare` | Cloudflare's wrangler (Workers, D1, KV, R2, Pages) as a global npm package, telemetry off; 'wrangler dev' needs no account. Pulls in install-node (v89, part of install-cloud) |
+| `install-cloudflared` | cloudflared from Cloudflare's apt repository, for tunnels; setup creates none. Opt-in, in no group (v89) |
+| `install-graphql` | Apollo's GraphQL tools as three binaries in \~/.local/bin from their GitHub releases (checksum-checked where the release has one): Rover, the Apollo Router (v2 only) and the Apollo MCP Server, plus Rover's composition and router plugins in \~/.rover. A \~/.bashrc block turns Apollo telemetry off and accepts the plugins' Elastic License v2. Local federation needs no account; APOLLO\_KEY is never exported. In install-all, no dependencies (v90) |
+| `install-testing` | The test tools: install-playwright, install-selenium, install-bdd and install-robot. Test libraries (@playwright/test, cucumber-js, Behat, behave, Reqnroll's packages) stay per project. In install-all (v91) |
+| `install-playwright` | Playwright's Chromium, Firefox and WebKit in \~/.cache/ms-playwright with their system libraries (separate filtered install-deps using that release’s list; v99 installer and version record in assets/tools/playwright), and Playwright MCP warmed in npx's cache. Pulls in install-node. Part of install-testing (v91) |
+| `install-selenium` | A Selenium Grid (selenium/standalone-chrome) as the devsvc service selenium: WebDriver on 127.0.0.1:4444, noVNC on 127.0.0.1:7900 to watch it, DDEV name devselenium, created stopped, a heavy engine (\~1.6 GB), no login and never LAN-shared. Plus Selenium Manager's chromedriver for the installed Chrome in \~/.cache/selenium (no chromedriver on PATH) and SE\_AVOID\_STATS in \~/.bashrc. Part of install-testing (v91) |
+| `install-bdd` | The Gherkin runners' machine-level part: Reqnroll's dotnet new templates (SpecFlow's successor) when .NET is installed. Cucumber, Behat (4.x for Symfony 8, 3.x with Drupal's Drupal Extension) and behave are per project. No dependencies. Part of install-testing (v91) |
+| `install-robot` | Robot Framework as a uv tool on Debian's Python with the Browser (Playwright), SeleniumLibrary and RequestsLibrary libraries; robot, rebot, libdoc and rfbrowser in \~/.local/bin; the Browser library's Node side without browsers (it uses the system Chrome). Pulls in install-node. Part of install-testing (v91) |
+| `install-cypress` | Cypress's system libraries (Debian 13's t64 names, Xvfb) and a \~/.bashrc block turning crash reports off; Cypress itself is per project (npm 12 needs "allowScripts": {"cypress": true}). Pulls in install-node. Opt-in, in no group (v91) |
+| `install-gitlab` | glab, GitLab's CLI, from Homebrew (like gh; Debian's own glab is years behind) with bash completion, and gitlab-ci-local (npm) to run a project's .gitlab-ci.yml here, jobs with an image in Docker; plus rsync and git. Logins come from init. Pulls in install-node. In install-all (v91) |
+| `install-gitlab-runner` | GitLab Runner from GitLab's apt repository as the gitlab-runner service, its user in the docker group for the Docker executor; left unregistered until init registers it with GITLAB\_RUNNER\_TOKEN\_ONCE. Pulls in install-gitlab. Opt-in, in no group (v91) |
+| `install-vue` | Vue.js scaffolding warmed for offline use: create-vue and create-nuxt in npx's cache and Nuxt's minimal template in \~/.cache/giget. Nothing global: Vue, Pinia, Vue Router and Nuxt stay per project. Pulls in install-node. In install-all (v91) |
+| `install-herdr` | herdr, a terminal multiplexer for coding agents (github.com/herdrdev/herdr, Apache-2.0): workspaces and panes like tmux, each agent's state (working, blocked, idle), and the layout restored after a restart. Its own installer (saved to assets/downloads, run with sh; it checks the binary's SHA-256 from herdr's manifest) puts `herdr` in \~/.local/bin; an installed herdr is left alone (`herdr update` updates it). Pulls in install-node. In install-all (v95) |
+| `install-puppet` | OpenVox, Vox Pupuli's free fork of Puppet: openvox-agent (puppet, facter) and OpenBolt (bolt) from apt.voxpupuli.org, in /opt/puppetlabs/bin at the end of PATH. OpenVox 8; OPENVOX\_MAJOR=9 picks the next line. Masterless: the agent service is disabled. Opt-in, in no group, not in install-all (v91) |
+| `install-chef` | Cinc Workstation, the free build of Chef Workstation (cinc-client, knife, Test Kitchen with Dokken, Cookstyle, ChefSpec, Berkshelf, cinc-auditor), its .deb checked against Cinc's SHA-256, in /opt/cinc-workstation/bin at the end of PATH. No license key. Opt-in, in no group, not in install-all (v91) |
+| `install-config-mgmt` | Group: install-puppet + install-chef. Ansible stays in install-iac. Opt-in, not in install-all (v91) |
+| `install-jev` | Jev (TypeSafe AI) readiness: TypeSafe's agent skill for Claude Code, key slots in secrets.env, SDK and live-call tests. Nothing else is installed: the model is hosted and its SDKs are per project (v67, part of install-all) |
+| `install-iac` | Terraform, tflint, Bicep when azure is present (v57); Ansible, full package via install-ansible-full (v76) |
+| `install-ansible-full` | Ansible in one pipx venv named ansible-core on Debian's Python: ansible-core, the ansible community package (about 90 collections, ansible-community), ansible-lint, Molecule and the Docker SDK; about 520 MB (v76, part of install-iac) |
+| `install-ansible-core` | The lean Ansible: the same venv without the community package, plus community.docker from Galaxy; about 85 MB. Standalone, in no group; when full is also asked for or already installed, full is kept (v76) |
+| `install-web` | Angular CLI, corepack (pnpm/yarn shims), Composer; pulls in node automatically (v58); php-redis, php-memcached and php-mongodb (v89) |
+| `install-tanstack` | TanStack CLI (@tanstack/cli) and corepack for pnpm; pulls in install-node (v65, part of install-all) |
+| `install-drupal` | Terminus (Pantheon), acli (Acquia) and the Upsun CLI, the Terminus rsync plugin, bash completion, rsync and a MariaDB client; pulls in install-web (v68, part of install-all; DDEV telemetry moved to base in v96) |
+| `install-laravel` | Laravel 13: the Laravel installer (laravel new) as a global Composer package, with Composer's global bin added to PATH, and php-bcmath. Pulls in install-web (Composer and the PHP extensions Laravel needs) and install-node (Vite). Pest, Pint, Sail and Boost stay per project; DDEV's laravel project type works as is. In install-all (v87) |
+| `install-symfony` | Symfony 8: the Symfony CLI (symfony new, symfony serve, check:requirements, check:security) as the .deb from its GitHub releases, checked against the release's checksums, with no extra apt source. Pulls in install-web (Composer and the PHP extensions Symfony needs; PHP 8.4 is trixie's own). Doctrine, MakerBundle and PHPUnit stay per project; DDEV's symfony project type works as is. In install-all (v88) |
+| `install-k8s` | kubectl, helm, kind, k9s (v58) |
+| `install-cpp` | gdb, valgrind, cmake, ninja, pkg-config, clang/clangd/clang-format/clang-tidy, lldb, ccache, meson; gcc and g++ are already in base (v63, part of install-languages) |
+| `install-asm` | nasm, yasm; GNU as and ld are already in base (v63, part of install-languages) |
+| `install-dotnet` | .NET 10 SDK from Microsoft's Debian feed: C# and VB.NET (v63, part of install-languages) |
+| `install-java` | default-jdk (21 on trixie, the same JDK the Android stacks use) and JAVA\_HOME, Maven from apt, Gradle from Homebrew (v63, part of install-languages) |
+| `install-asm-arm` | AArch64 cross toolchain and qemu-user; opt-in only, not part of install-all (v63) |
+| `install-com` | **Not in v1** (not yet supported on WSL). On the Chromebooks: COM / DCOM / ActiveX development under Wine: wine (64 + 32-bit, i386 multiarch), mingw-w64 with widl, libwine-dev (the system .idl files) and stdole2.tlb, winetricks. A WoW64 Wine prefix at \~/.local/share/wine/com (the wine-com wrapper runs programs in it) and DEV\_COM\_\* in \~/.bashrc. Build a server with widl + mingw, register it with regsvr32, create it with CoCreateInstance, in-process or out-of-process. ATL/MFC (MSVC only) and a cross-machine DCOM server (that side belongs on a Windows laptop) are not covered. Opt-in, in no group (v85) |
+| `install-retro` | **Not in v1** (not yet supported on WSL). On the Chromebooks: DOS and old Windows: Open Watcom v2 in /opt/watcom (wcl for 16-bit DOS, wcl386 for DOS/4GW 32-bit and, with -bt=nt, Win32; -bt=windows for Win16), and five guests from your own media, each with a command and a launcher icon: win31 (Windows 3.1x) and win95 (Windows 95, FAT32 on OSR2) on DOSBox-X, winnt40 (NT 4.0) and win2000 on QEMU (NT auto/KVM when usable, win2000 defaults to TCG; setup handles KVM group membership), delphi1 (Delphi 1 alone, in its own 32-bit Wine prefix). Media goes in \~/\<guest>/install (Delphi 1: \~/win31/install/apps); '\<cmd> setup' creates the guest's disk after a free-space check. 'retro run FILE' runs one program on the engine its header calls for. Adds qemu-system-x86, qemu-system-gui, qemu-utils, mtools, dosfstools and (v93) libarchive-tools. Pulls in install-com. Opt-in, in no group (v85; QEMU, win95, winnt40, win2000, delphi1 and retro since v92; program CDs as F:, the disk-size settings, win95 snapshots and the delphi command for Delphi 3, 4, 5, 6 and 7 since v93) |
+| `install-hermes` | Hermes Agent (Nous Research), a personal agent with memory, skills and a messaging gateway: its own installer from GitHub, code in \~/.hermes/hermes-agent, the hermes command in \~/.local/bin, data in \~/.hermes. No setup wizard, gateway service, desktop-control driver or browser tools (HERMES\_BROWSER=1 adds the browser). It keeps to its own logins, so it never borrows Claude Code's. Needs a model with a 64K-token context: init sets one from secrets.env. Opt-in, in no group (v86) |
+| `install-openclaw` | OpenClaw, a personal agent with a gateway and Control UI: the npm package openclaw (about 900 MB) on nvm's Node 24.16+ or 26.1+, so it pulls in install-node. No gateway service; the gateway stays on loopback with a token; anonymous feature statistics recorded off (the daily update check stays on). No ClawHub skills. OpenClaw runs shell commands without asking by default; init sets tools.exec.mode=ask. Needs a model with a 64K-token context: init sets one from secrets.env. Opt-in, in no group (v86) |
+
+### Have in the assets folder (optional fallbacks)
+
+- `Cursor*.AppImage` — used if the cursor.com download endpoint fails. Since v67 setup looks in assets first, then the current directory.
+
+Since v98, setup records Cursor's installed `downloadUrl` and API version in `assets/cursor-install.json`.
+A rerun with that URL and an installed AppImage says it is current and downloads nothing. A missing
+record downloads once; a changed URL replaces the build only after validation. A failed lookup or
+download keeps the existing build and record. A hand-supplied AppImage clears the API record so the
+next successful lookup can establish it. The record is kept; temporary download staging is removed.
+- `*antigravity*.tar.gz` — the Linux x64 tarball of Antigravity IDE, the Antigravity 2.0 desktop app, or both, from antigravity.google/download. Google publishes no stable download link for these, so they stay a manual download; the CLI and SDK install regardless. Since v73 setup installs each tarball it finds under /opt (antigravity-ide or antigravity), links the command into \~/.local/bin, sets up the Chromium sandbox helper and adds a Start menu entry. Leave the file in assets: rerunning with the same tarball changes nothing, and a newer one replaces the install. Looked for in assets first, then the current directory.
+- `*InterBase*.zip` (or the ib\_install\_linux\_x86\_64.bin inside it) and any license slip file — only for install-interbase or install-db-server. The free Developer Edition is a registered download from Embarcadero, so it cannot be fetched unattended; keep the serial number from the download email for init. Without it, install-db-server still sets up SQL Server and Oracle, and the test reports InterBase as a single WARN rather than failures. Since v80.
+- Nothing else: Lazarus, Android Studio, the Android SDK and Godot download themselves.
+
+### No setup-time prompts
+
+Through v67, `install-gemma` stopped at an interactive `hf auth login` unless `HF_TOKEN` was already in the environment, even with the token sitting in `secrets.env`, because setup never read that file. Since v68 setup takes `HF_TOKEN` from the environment or from `secrets.env`, and with no token it skips the login and leaves it to init. Setup reads nothing else from the secrets file; every other login belongs to init.
+
+### After it finishes
+
+- `source ~/.bashrc` and `newgrp docker`, or open a new terminal.
+- Shut Linux down once (right-click the Terminal icon, Shut down Linux) and reopen it, so the docker, video and render groups take effect; without the render group every graphical app renders in software. Then run init with the same flags to apply secrets.env, then the test script. Tested before init, every login shows as a WARN and the test says init is pending.
+
+- **`devmem`** (v96, in `~/.local/bin`) is the memory report: total, used and available (and that there is no swap), where "used" is (Linux's processes by PSS, the kernel, shared memory, and the rest as "not accounted for (estimate)"), the top ten programs, the bundle's running containers (devsvc, devdb, devldap, DDEV) and Ollama's loaded models, then a verdict: less than 1 GB available, Linux's Google Chrome running, a heavy engine or database server running (with its stop command), no swap. Reach for it when a Linux app freezes or the machine is slow, and before starting a heavy engine. `devmem --watch [seconds]` refreshes it in place until Ctrl-C; `devmem --brief` prints the memory line and the verdict only.
+- **`devclean`** (v96; editors, Chrome's profile caches and `--where` since v97; in `~/.local/bin`) is the disk cleanup. Reach for it when the disk is nearly full, before pulling large Docker images (DDEV's want about 3 GB free), or when `ddev start` panics with "assignment to entry in nil map" (a full disk left DDEV's state files empty). `devclean` alone only reports: free space, what each cache would free (measured by the tool where it can say, `du` otherwise) and the total, and it changes nothing. `devclean --run` clears them, each step only when its tool is installed, one failing step not stopping the rest, and shows what each step freed next to what the report measured (v97; each reading after a `sync`, since btrfs gives deleted space back at its next commit), then free space before and after; `devclean --run --images` also removes Docker images no container uses, naming them first (they download again when a demo or `devsvc` needs them). Every `--run` also moves a 0-byte `~/.ddev/.state.yaml` aside as `.bak`, so `ddev start` writes a new one. `~/.ddev/.update` is always 0 bytes (DDEV reads only its date, for the update check), so since v97 it is left alone; a `.update.bak` an earlier `devclean` left can be deleted. Since v97 it also covers the editors and Linux Chrome's profile, each step only while that program is closed (otherwise the line says "left: VS Code is open"; close it and run `--run` again):
+
+  - **Editors' cached extension downloads:** `CachedExtensionVSIXs` under `~/.config/Code`, `~/.config/Cursor`, `~/.config/Devin` (and any other VS Code-based editor's config folder that has one): a copy of every extension package the editor downloaded, which installed extensions don't need (1.7 GB for VS Code on Oct 26 2026).
+  - **Extension versions left behind:** in `~/.vscode/extensions`, `~/.cursor/extensions` and `~/.devin/extensions`, a folder no profile's `extensions.json` uses while another version of the same extension is the installed one (rolling Codex back to 26.1007.21434 left 26.1021.22027 on disk, 1.2 GB). The report lists each with its size and the version installed. Devin's profiles all share `~/.devin/extensions`, so a version any profile still uses stays; if a list can't be read, nothing in that folder is touched.
+  - **Linux Chrome's profile caches:** `Cache`, `Code Cache`, `GPUCache` and `Service Worker` in each profile under `~/.config/google-chrome`, as well as `~/.cache/google-chrome`. Since v98, also the exact top-level `ShaderCache`, `GrShaderCache` and `GraphiteDawnCache` directories: Chrome rebuilds these on use. No recursive `*Cache*` deletion. The profile itself (bookmarks, sign-ins, history, settings, extensions), downloaded components/models and unexplained folders are kept. The old profile's 997 MB (Oct 27) was cleaned before the v98 inspection; this fresh instance had only 4 KB and no Default profile, so the rest of the old size is unknown. Absent caches are normal and mean 0 B to clear.
+
+  Since v98, **gone DDEV projects' built images** have their own line, with each tag and an "up to"
+  size (layers shared with DDEV's images stay). `--run` removes only built-image tags for projects
+  absent from a successful `ddev list`; current projects' images, base images, images used by running
+  or stopped containers, and images sharing a protected tag stay. If DDEV or Docker cannot be read,
+  all of those images stay. This does not delete project code, databases or volumes. `--images` still
+  removes the wider set of unused Docker images, as before.
+
+  The Docker build-cache line says "up to": `docker builder prune -af` empties it, but layers it shares with images in use stay with those images (Oct 26: a 2.7 GB cache, emptied, freed less, since DDEV's images had just been built from it).
+
+  **Where is the space** (v97): `devclean --where` is a report on its own and changes nothing: the ten largest entries in your home folder (dot folders included), the six largest in `~/.config`, Docker's image store (`/var/lib/containerd` and `/var/lib/docker`, read with `sudo -n` when allowed, plus `docker system df`; Docker 29 keeps its images under containerd, so `/var/lib/docker` alone looks nearly empty), and the three largest editor folders with their five biggest parts each (two versions of one extension show up there). Since v98 it also shows the largest parts of Linux Chrome's user-data directory and each profile; a fresh instance without profiles is normal. The same checks by hand, the ones that found what v96's `devclean` missed:
+
+  ```
+  du -xsh ~/.[!.]* ~/* 2>/dev/null | sort -h | tail -10
+  sudo du -xsh /var/lib/docker /var/lib/containerd 2>/dev/null
+  du -sh ~/.vscode/extensions/<publisher.name>-* 2>/dev/null
+  du -sh ~/.config/* 2>/dev/null | sort -h | tail -6
+  du -sh ~/.config/Code/* | sort -h | tail -5
+  docker system df
+  ```
+
+  By hand, what each step is and what it freed (dragonair, Oct 26 2026; the last three rows the 30 GB v96 test machine, the same day):
+
+  | Command | What it frees | Oct 26 |
+  | --- | --- | --- |
+  | `npm cache clean --force` | npm's download cache (`~/.npm/_cacache`) | 2.3 GB |
+  | `docker builder prune -af` | Docker's build cache (`docker system df` undercounts it) | 2.7 GB |
+  | `docker image prune -f` | dangling (untagged) images | |
+  | `sudo apt clean` | apt's downloaded packages, the partial downloads, and its package caches `/var/cache/apt/*.bin` (apt rebuilds them; since v97 the report counts them too, with `sudo -n`) | 90.4 MB (Oct 27) |
+  | `brew cleanup -s` | Homebrew's old versions and downloads | 264 MB |
+  | `uv cache clean` (v97; was `uv cache prune`, which keeps whatever is referenced and freed 0 B of 548 MB) | uv's whole cache; tool environments and Pythons are in `~/.local/share/uv` and stay. Since v97 setup upgrades aider in place, so the next setup downloads nothing for a current aider (before, its `--force` install downloaded all of aider again after this) | 641 MB |
+  | `go clean -cache` | Go's build cache | 133 MB |
+  | `composer clear-cache` | Composer's downloads | 61 MB |
+  | `pnpm store prune` (or `rm -rf ~/.cache/pnpm`) | pnpm's unreferenced packages, its metadata cache | 172 MB |
+  | `pip cache purge` | pip's downloads | |
+  | `rm -rf ~/.cache/google-chrome` (Linux Chrome closed) | Linux Chrome's cache | 189 MB |
+  | `docker image prune -a` (`--images`) | images no container uses; they download again | |
+  | `rm -rf ~/.config/Code/CachedExtensionVSIXs/*` (VS Code closed; same for Cursor, Devin) | the editor's copies of downloaded extension packages | 1.7 GB |
+  | `rm -rf ~/.vscode/extensions/<publisher.name>-<old version>` (VS Code closed) | an extension version another one replaced | 1.2 GB |
+  | `rm -rf ~/.config/google-chrome/Default/{Cache,"Code Cache",GPUCache,"Service Worker"}` (Linux Chrome closed) | Linux Chrome's profile caches | |
+
+  **Never delete** (`devclean --help` says the same): `docker system prune` (it deletes stopped containers, and the bundle's services, `devsvc-*`, `devdb-*`, `devldap-*`, are containers created stopped), Docker volumes (the databases' and services' data), `~/.cache/ms-playwright` (Playwright's browsers, ~1 GB to fetch again), Hugging Face caches (downloaded models), Ollama models (`ollama rm NAME` removes one on purpose), `~/dev-demo` (the demos and your changes; `demo-clean` removes a flag's demos), DDEV projects (`ddev delete` is per project), and since v97: an extension version still in use (any profile's `extensions.json` names it), editors' `User` folders and their `globalStorage` (settings, profiles, extensions' sign-ins), browser profiles other than their cache folders (bookmarks, sign-ins, settings), `~/.config/nvm` (the Node versions nvm installed).
+
+Since v93 setup checks the network first: if IPv6 doesn't get out (the Oct 4 hang on Chrome's download), it makes Linux prefer IPv4 with the same two lines that fixed it by hand (`/etc/gai.conf` and `/etc/apt/apt.conf.d/99force-ipv4`; `DEV_PREFER_IPV4=0` skips the check). Every download gets a 20-second connection timeout, and a bad Go or PowerShell download now skips just that tool; the summary at the end names it and the flag to rerun.
+
+Since v96 the test also times a new login shell ("a new login shell starts in under 5 s", with the median of three runs in the line, and in the log so runs can be compared). VS Code and Cursor started from their launcher icons run `bash -i -l` to read your environment and give up after 10 s, after which they run without the PATH `~/.bashrc` builds, silently. The check warns from 5 s and fails from 10 s. Its hint then lists the five slowest lines of one traced run, each with how long it took (time to the next traced line), its file and line number, and the line itself: that is where to look in `~/.bashrc` or `~/.profile`. A shell that is still running after 30 s is reported with the last line it traced. To see the whole trace yourself: `PS4='+ $EPOCHREALTIME ' bash -x -i -l -c true 2> trace.txt`.
+
+The test script ends with a disk report (v77): the measured size of every installed stack, then totals for apt, Homebrew (with its eight biggest formulae), Docker data, caches, `~/dev-demo`, the home directory and the Linux disk. It prints them as INFO lines and saves a copy to `assets/logs/disk-<timestamp>.tsv`, labelled with `MACHINE_LABEL` from `secrets.env` so reports from different machines can be compared. The totals overlap the per-stack lines on purpose, because apt and Homebrew each hold several stacks. Add `nodisk` to skip it; it takes a minute or two. Under WSL the report also has one row for the Windows drive's free space, since `df` inside WSL reads the distro's virtual disk (wsl-gotchas.md).
+
+### Links and DDEV sites in the Windows browser
+
+- **Links from Linux open in the Windows default browser.** Setup writes its own opener, `~/.local/bin/dev-open`, registers its entry `dev-open.desktop` as the handler for web links (`xdg-mime`), and sets `BROWSER` in a marked `~/.bashrc` block. It calls Windows by absolute path, so it works with the Windows PATH left out of WSL. Sign-in pages, `--open` dev servers and docs open on Windows, with your Windows sign-ins. Playwright, Selenium, Cypress and Puppeteer start their own browser and are unaffected; Linux Chrome stays installed for them.
+- **Back to Linux Chrome**, if you prefer it: `xdg-mime default com.google.Chrome.desktop x-scheme-handler/https x-scheme-handler/http text/html`. Setup's next run sets the opener again.
+- **DDEV sites are `https://<site>.ddev.site:8443`** (and `http://…:8080`). Setup sets `ddev config global --router-http-port=8080 --router-https-port=8443` unless you set ports of your own, the same ports as on the Chromebooks; the Windows browser reaches them through WSL's localhost forwarding. After a change, `ddev poweroff` and start the project again.
+- **DDEV's certificates are trusted in the Windows browser** when the host script's mkcert step has run: `mkcert -install` on Windows, with `CAROOT` shared into WSL through `WSLENV`, so one CA serves both sides. Setup reports which CA folder it used, and the test warns when it is not the shared one. If the browser still says "Not secure": run the host script, open a new terminal, rerun setup, then `ddev poweroff` and start the project again.
+
+### Lazarus (install-lazarus, v94)
+
+Setup installs Lazarus from the SourceForge debs, then rebuilds the IDE on Qt5: the stock GTK2 IDE draws some dialogs blank under Crostini and they never take the keyboard (reference/dev-setup-chromebook/docs/crostini-gotchas.md). It builds four IDE binaries, so neither the first start nor a switch waits on a build: a light profile (`~/.lazarus`) and a dark one (`~/.lazarus-dark`), each docked and floating. Expect 10–20 minutes more than a plain Lazarus install on a clean machine. On disk, Lazarus with the four Qt5 IDE builds takes about 3.2 GB (dev-test disk report, Oct 25 2026); the test's disk report measures it on each machine. Build logs go to `assets/logs/lazarus-build-<profile>-<layout>.log`. There is no extra flag, no key and no prompt.
+
+- **Two launchers:** **Lazarus** opens the light profile; **Lazarus (Dark)** opens the dark one through qt5ct (`env QT_QPA_PLATFORMTHEME=qt5ct startlazarus --pcp=$HOME/.lazarus-dark`). Pick light or dark by the launcher you open; both can run side by side.
+- **Any dark palette is fine** (v95). Setup starts qt5ct on Fusion with the **darker** palette, only when there is no `~/.config/qt5ct/qt5ct.conf` yet, and leaves yours alone. To pick another: `lazmode theme`, Appearance → Palette → **Custom**, choose one (darker, waves, dusk…), Apply. dev-test names the style and palette in use and passes for any of them; it warns only when the dark launcher wouldn't look dark (the custom palette is off, or its file is gone).
+- **Docked is the default.** The docked build has the main window docked (AnchorDocking) and the form designer as an editor tab (DockedFormEditor).
+- **`lazmode`** (in `~/.local/bin`) switches between the builds setup made, so a switch is a file copy that takes seconds while both are current. It refuses to switch or rebuild while Lazarus is running. `--profile light|dark|both` defaults to both.
+
+| Command | What it does |
+| --- | --- |
+| `lazmode status [--check]` | Per profile: the active layout, both builds with their widget set and whether each is current or stale (built from an older install list), the install list and whether it follows the layout, the widget set the IDE's own rebuilds target (v96: gtk2, lazbuild's default, is set to qt5 here when Lazarus is closed), docking in the IDE's own options (v96: on or off; written as on when not saved yet), the dark launcher's `Exec=` line, and qt5ct's style and palette. `--check` exits 1 unless all of that is in order (setup and init use it), and 2 when only the docking option is off while docked is active |
+| `lazmode dock on` / `lazmode dock off` | The docked or the floating build becomes the active one (next IDE start), and the install list follows it. A stale layout is rebuilt first (minutes, with the build log as in `rebuild`), so a switch never drops packages. v96: `dock on` also turns docking on in the IDE's own options; `dock off` leaves them alone |
+| `lazmode rebuild [--add-package <lpk>…]` | Rebuilds both layouts on Qt5 and keeps the active one. Packages given here are recorded in `<profile>/lazmode-packages` and included in every later rebuild (for scripted installs; from the IDE is the everyday way, below). The floating build runs with the docking packages out of the profile's install list (`miscellaneousoptions.xml`), and afterwards the list follows the active layout. Also the way back after a Lazarus upgrade |
+| `lazmode theme` | Opens qt5ct for the dark profile's style and palette |
+| `lazmode vscode [dir\|project.lpi] [--profile light\|dark] [--force]` | v96: sets a Lazarus project up for building and debugging in VS Code, Cursor and Devin (below) |
+
+- **Install packages from inside the IDE** (v95): Package → Install/Uninstall Packages, or yes when a project asks to install the packages it needs. The IDE rebuilds itself from the profile's install list and restarts. That list names the docking packages exactly while docked is active, so the IDE comes back in the layout it was started in, with the new packages. The next `lazmode` command adopts that build as the active layout (the old one is kept as `bin/lazarus-<layout>.bak`). The other layout is then stale: `lazmode status` says so, dev-test fails on it, and `lazmode dock on|off` rebuilds it before switching (or run `lazmode rebuild` when convenient). That rebuild uses the widget set of the IDE's build profile (Tools → Configure Build Lazarus). lazbuild saves gtk2 there, so since v96 setup (through `lazmode status`) and every `lazmode` build set it to qt5 in both profiles, and dev-test checks it. Before v96 the first package installed from the IDE rebuilt it on GTK2 (Oct 27 2026). A widget set you choose there yourself is kept, and dev-test only warns. If the IDE's rebuild ever comes out GTK2 instead of Qt5, `lazmode` keeps it aside as `bin/lazarus.ide-built-gtk2`, puts the Qt5 layout back, and `lazmode rebuild` builds both layouts with your packages. `lazmode rebuild --add-package` stays for scripted installs.
+- **Single window or multi window** (v96): the docked build docks only when the IDE's own options say so (`<profile>/anchordockingoptions.xml`, Tools → Options → Environment → Docking / Anchordocking). Without that file, its first start asks "single window or multi window". Before v96, picking multi window there left the docked build undocked while `lazmode status` said docked (Oct 27 2026). Setup, through `lazmode`, now writes the file with docking on in both profiles when it's missing, so the question doesn't come; an answer you already saved is kept. With docked active and docking off, `lazmode status` says so, setup prints a NOTICE, init lists a todo and dev-test fails. The fix is `lazmode dock on` (docking on, with Lazarus closed), or `lazmode dock off` to keep multi window with the floating build.
+- **Lazarus projects in VS Code, Cursor and Devin** (v96): `lazmode vscode` in a project's folder (or `lazmode vscode path/to/project.lpi`). Neither IDE is needed to build: `lazbuild` reads the `.lpi` (build modes, unit paths, packages) as the IDE does, with the IDE's own profile (`--pcp`), so packages installed from the IDE are found. The profile is the dark one when `~/.lazarus-dark` exists; `--profile light` picks the other. It:
+  - **adds a build mode, Debug-gdb**, to the `.lpi`: a copy of Debug (or, in a project without one, of its default mode with debug info on) set to **Dwarf 2 with sets** (`-gw2 -godwarfsets`). The two debuggers want opposite debug info: Lazarus's FpDebug needs DWARF 3, while gdb reads strings only with Dwarf 2 with sets (on DWARF 3 they showed as `<unknown>`, Oct 26 2026). Debug itself isn't changed; if it isn't on Dwarf 3, `lazmode vscode` says how to set it (Project Options → Debugging → Type of debug info). The original is kept as `<project>.lpi.bak` the first time, and the edited copy is built with `lazbuild --bm=Debug-gdb` before it replaces the original. The new mode shows in Lazarus under Project Options → Build modes and can be deleted there. When the project's target or unit output path doesn't vary by build mode (no `$(BuildMode)` in it; TDaemon's target says `…\Debug\TestDaemon`, a literal Debug), Debug-gdb gets its own folders: a folder named Debug becomes Debug-gdb (else one is added), so the two builds sit side by side (`x86_64-linux/Debug/TestDaemon` and `x86_64-linux/Debug-gdb/TestDaemon`) and Debug is left as it was. `lazmode vscode` says so.
+  - **writes `.vscode/`**: `tasks.json` (Ctrl+Shift+B builds Debug; tasks for Debug-gdb and a clean `-B` build of each; Free Pascal's errors and warnings land in Problems and click through), `launch.json` with two configurations, `extensions.json` and `settings.json`. Files already there are kept unless `--force`.
+  - **Which configuration in which editor:** in **VS Code**, `<project> (FpDebug), for VS Code` (extension *Free Pascal (fpc) Debugger*, `CNOC.fpdebug`, only on Microsoft's marketplace): strings, objects and `Self` readable in Variables and Watch, watches in Pascal. In **Devin** and **Cursor**, `<project> (gdb), for Devin and Cursor` (*Native Debug*, `webfreak.debug`, on Open VSX; Devin offers it on the first F5): breakpoints, stepping, threads and the call stack; print with `p NAME` in the Debug Console, names in capitals (`p LOGFILEPATH`); `Self` is `this` (`this.FField`). Expanding a string in Variables fails there (Native Debug builds C expressions while gdb is in Pascal mode; the Watch panel reads it, below) and file variables stay `<unknown>` (the tip below works in gdb too); the Lazarus IDE shows records, objects and file variables directly. Each editor offers the recommended extensions its store has when the folder opens (Devin and Cursor won't find `CNOC.fpdebug`; that's expected).
+  - **Arguments:** the project's own run parameters when it has them; for a daemon (the LazDaemon package) `-r`, which runs it in the foreground, so TDaemon's F5 starts its worker thread.
+  - **Tip for file variables (FpDebug and gdb):** a `Text` or `File` variable shows as unknown in both debuggers, since the RTL ships without debug info. Add `fView: TextRec absolute f;` next to `f` in your own code (same memory, no code; `TextRec` is in the System unit): the unit's debug info then has `TextRec`, and a `fView` watch (or `TextRec(f)`) expands: `Name` (the path), `Mode` (`fmClosed`, `fmInput`, `fmOutput`), `Handle`, `BufPos`, `BufEnd`. gdb in Devin shows `Mode` as a number (Oct 27 2026: 55218 = `$D7B2` = `fmOutput`). Remove it when done, or leave it; it costs nothing. Stopped *before* `AssignFile` runs, every field reads `$55…` (pointers `$5555555555555555`, bytes 85): that is the project's "Trash variables" option (`-gt`) filling uninitialised locals on purpose, not real values.
+  - **Native Debug after a profile import** (v97, Oct 27 2026): importing a VS Code profile into Devin (63 extensions) left out Native Debug (`webfreak.debug`), which the `(gdb)` configuration needs, so F5 did nothing. The `.vscode/extensions.json` that `lazmode vscode` writes recommends it, so Devin offers it ("Do you want to install the recommended 'Native Debug' extension…?"): Install fixes it. Devin installs from Open VSX, so VS Code-only extensions in such a profile don't come across either (Pylance, C# Dev Kit, Dev Containers, WSL, Codespaces, VS Code Speech, and FpDebug, which Devin doesn't need).
+  - **"Could not expand variable: A syntax error in expression"** (v97, Oct 27 2026): Native Debug with gdb shows some nested Pascal fields in Variables that way (it builds C-style expressions to expand them). The Watch panel reads the same values (TDaemon: `fView` with its fields, and `LogFilePath` as text); FpDebug in VS Code shows them all. Not a build problem.
+  - **GNU Global** (`global`, v96) is installed for the Pascal extension's Go to Definition and Find References (Ctrl+click), which otherwise says 'The "global" command is not available'. Global's own parsers don't read Pascal (found while building v96: the tags were empty), so setup also installs **Universal Ctags** (`universal-ctags`) and writes a marked block in `~/.globalrc` that sends Pascal files (`.pas .pp .lpr .inc .dpr`) to it and leaves Global's built-in parsers for everything else, taking them from the system `gtags.conf` by reference. It is machine-wide, so every project gets it and `lazmode vscode` writes no `gtags.conf`. A `~/.globalrc` with a `default` label of your own is left alone (setup names the two lines to add); where apt has no `universal-ctags`, setup prints a NOTICE and skips it, and navigation stays empty. `settings.json` turns on the extension's workspace navigation (`pascal.codeNavigation`) and lets it generate the tags itself (`pascal.tags.autoGenerate`); the tag files (`GTAGS`, `GRTAGS`, `GPATH`) land in the project folder and are hidden from the Explorer and search. By hand: `gtags` in the project folder, then `global -x LogToFile` lists the definition.
+- **Before v95** (found Oct 25 2026): the install list never named the docking packages, so the IDE's own rebuild came out floating, and `lazmode dock on` then brought back a docked build without the new packages, so a project kept asking for them. Rerunning setup with v95 rebuilds both profiles once (their builds have no record of the list they were made from).
+- **Still manual** (see GUI first-runs): the editor color scheme in each profile (Tools → Options → Editor → Display → Colors; e.g. Twilight for dark, Default for light) and the Object Inspector colors in the dark profile (Tools → Options → Environment → Object Inspector).
+- **Thread support for every compile** (v96): setup writes `~/.fpc.cfg` with `-dUseCThreads`, which `fpc`, `lazbuild` and both IDE profiles read. Lazarus's project templates and many of its examples (TDaemon among them) load the `cthreads` unit only behind `{$IFDEF UseCThreads}`, and without it a program stops with runtime error 232 ("This binary has no thread support compiled in") as soon as it starts a thread (Oct 26 2026, TDaemon's `-r`). fpc reads only the first config file it finds, so `~/.fpc.cfg` starts with `#INCLUDE` of the system file (`/etc/fpc.cfg` from the SourceForge deb) and the define sits in a marked block below it, rewritten in place on every run. A `~/.fpc.cfg` of your own keeps its own `-dUseCThreads` if it has one (setup reports it as already set); otherwise the block is appended, unless the file neither `#INCLUDE`s a system config nor sets `-Fu` paths, in which case setup only names the missing line. There is no switch to turn it off: the define only switches `cthreads` on in programs that ask for it. **A project built before v96 needs Run → Clean up and Build once**, since its compiled units were made without the define.
+- The window title bars are drawn outside Linux (by WSLg; on a Chromebook, by ChromeOS), so no Linux theme changes them.
+- Init reports Lazarus as configured once the four builds and the dark launcher are there and neither layout is stale (since v95), and as a skip before setup has installed it.
+
+### tmux and herdr (v95)
+
+tmux is in the base packages since v95: no `~/.tmux.conf` is written and nothing starts it from `~/.bashrc`. Use it for long jobs you detach from, SSH sessions to the other laptops over Tailscale that should survive a dropped connection, and scripts. herdr (`install-herdr`, in install-all) is the multiplexer for coding agents: start it with `herdr` where the work lives, run agents in its panes, `Ctrl+B q` detaches and `herdr` reattaches. Its server keeps running in the background after the terminal closes.
+
+- **Both use Ctrl+B as their prefix.** herdr inside tmux works: there, Ctrl+B Ctrl+B passes a Ctrl+B through to herdr (tmux's default `send-prefix`). Or change one of the two prefixes.
+- **A shell that starts tmux by itself** makes herdr see `tmux` instead of the agent in a pane. If you add such a rule to `~/.bashrc`, skip it inside herdr, which sets `HERDR_ENV=1` in its panes:
+  `if [[ -z ${TMUX:-} && ${HERDR_ENV:-} != 1 ]]; then tmux new-session -A -s main; fi`
+
+## The secrets file
+
+All keys live in `~/.config/dev-init/secrets.env` (mode 600, sourced by `~/.bashrc`); the script itself never contains a key. Empty values are skipped, `export`ed values reach every new shell, and `*_ONCE` values are consumed by init for a one-time login and never exported. Keep this file out of every repo.
+
+| Variable | Used by | Required? | Where it comes from |
+| --- | --- | --- | --- |
+| `GIT_NAME`, `GIT_EMAIL` | base | Yes | You |
+| `GH_TOKEN_ONCE` | base (`gh`, SSH key upload) | Yes, or interactive login | GitHub |
+| `GEMINI_API_KEY` | install-node (Gemini CLI, aider), install-gemma, install-agentic | Yes | Google AI Studio |
+| `HF_TOKEN` | install-gemma (Transformers path) | Yes for gated weights | Hugging Face |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | install-agentic | Yes | Langfuse Cloud |
+| `ANTHROPIC_API_KEY` | install-node, install-agentic | Optional | Anthropic Console |
+| `OPENAI_API_KEY` | install-node (Codex, aider) | Optional | OpenAI Platform |
+| `EXPO_TOKEN` | install-rn (via install-mobile) | Optional | Expo |
+| `AWS_DEFAULT_REGION` | install-aws | Preset to `us-east-1` | You |
+| `AWS_PROFILE` | install-aws | Uncomment after `aws configure sso` | Profile name you chose |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | install-aws | Fallback only | IAM console |
+| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | install-azure | Optional (service principal) | Azure portal, Entra ID |
+| `AZURE_SUBSCRIPTION_ONCE` | install-azure | Optional | Subscription name or id |
+| `GOOGLE_APPLICATION_CREDENTIALS` | install-gcp | Optional (headless only) | Service-account JSON key path |
+| `GCP_PROJECT_ONCE` | install-gcp | Optional | Project id |
+| `VERCEL_TOKEN` | install-vercel | Optional, commented out | vercel.com/account/tokens. Overrides a saved vercel login in every shell, so leave it commented unless you want that |
+| `TYPESAFE_API_KEY` | install-jev | One of the two Jev keys | console.typesafe.ai, Settings, Keys (early access is waitlisted) |
+| `AI_GATEWAY_API_KEY` | install-jev | One of the two Jev keys | Vercel dashboard, AI Gateway tab. Reaches Jev as model typesafe-ai/jev through the AI SDK |
+| `MACHINE_LABEL` | base, install-drupal | Optional, recommended | You: a short name for this laptop. Labels the SSH key uploaded to GitHub, Pantheon and Acquia, since every Linux container is otherwise called penguin |
+| `TERMINUS_MACHINE_TOKEN_ONCE` | install-drupal | Optional; needed for Pantheon, which has no browser login | Pantheon dashboard, Account, Machine tokens |
+| `ACQUIA_API_KEY_ONCE`, `ACQUIA_API_SECRET_ONCE` | install-drupal | Optional; needed for Acquia | cloud.acquia.com, profile menu, Account settings, API Tokens |
+| `UPSUN_CLI_TOKEN` | install-drupal | Optional, commented out | console.upsun.com, My profile, API tokens. Only if you have projects on Upsun |
+| `ANSIBLE_VAULT_PASSWORD_FILE` | install-ansible-full, install-ansible-core | Optional, commented out | You: path to a one-line vault password file (mode 600). Uncomment only once the file exists: Ansible refuses to run at all when it is missing |
+| `OLLAMA_REMOTE` | install-ollama (the ollama-remote command, dev-demo's compare remote) | Optional, commented out | You: another machine's Ollama, e.g. http://192.168.1.50:11434, or with install-lan a laptop name such as winlaptop (port 11434 is assumed). A Chromebook serves it with LAN\_SHARE=ollama (since v93 over Tailscale: use NAME.internal or its 100.x address, since Ollama answers a plain laptop name with 403); a Windows laptop needs OLLAMA\_HOST=0.0.0.0:11434 and a firewall rule. Plain ollama stays local |
+| `OLLAMA_API_KEY` | install-ollama (direct calls to ollama.com's API) | Optional, commented out | ollama.com/settings/keys. The local CLI does not need it: :cloud models go through 'ollama signin' |
+| `DEEPSEEK_API_KEY` | install-ollama (aider, langchain-deepseek) | Optional, commented out | platform.deepseek.com, API keys. Init checks it against api.deepseek.com |
+| `INTERBASE_SYSDBA_PASSWORD` | install-interbase (test, demo) | Optional, commented out | You: set it only after changing SYSDBA's password from the default masterkey (init prints the gsec command). The serial number is never stored here |
+| `MSSQL_SA_PASSWORD`, `ORACLE_PWD` | install-mssql, install-oracle (the mssql and oracle commands, test, demo) | Optional, commented out | You, only to pick your own before the first setup run with the flag; otherwise setup generates one and 'mssql password' / 'oracle password' print it. Letters, digits and \_ are safe for both. Update it here if you change it inside the database: init reports a skip when the two differ |
+| `LDAP_BASE_DN, LLDAP_ADMIN_PASSWORD, OPENLDAP_ADMIN_PASSWORD, LDAP_BIND_PASSWORD, LDAP_SAMPLE_PASSWORD` | install-ldap, install-ldap-full (setup only; not exported) | Optional, commented out | You, only to pick your own before the first setup run with the flag; otherwise setup generates them. Either way they are kept in \~/.config/devldap/ldap.env (mode 600), which wins from then on and which the ldap command, test and demo read; 'ldap passwords' prints them. Init reports a skip when secrets.env and ldap.env differ |
+| `LAN_HOSTS, LAN_SELF, LAN_SHARE, LAN_DEV_PORTS, LAN_MCP_PORTS, LAN_EXTRA` | install-lan, install-lan-share (the lan command, init, test, demo; not exported) | Optional | You. LAN\_HOSTS: every laptop as name=address, the same list on each (reserve each address on the router first). LAN\_SELF: this machine's name in it, when not MACHINE\_LABEL. LAN\_SHARE: what this machine serves. The last three stay commented unless you change the dev-server (3000 4200 5173) or MCP (8000) ports or add more relayed ports |
+| `AGENT_PROVIDER, AGENT_MODEL, AGENT_ANTHROPIC_API_KEY, OPENROUTER_API_KEY` | install-hermes, install-openclaw (init) | Optional | You. AGENT\_PROVIDER: auto (the first of AGENT\_ANTHROPIC\_API\_KEY or ANTHROPIC\_API\_KEY, OPENROUTER\_API\_KEY, OLLAMA\_REMOTE with AGENT\_MODEL), anthropic, openrouter, ollama-remote or skip. AGENT\_MODEL: empty means Sonnet (claude-sonnet-5-5; anthropic/claude-sonnet-5.5 on OpenRouter); required for a remote Ollama, which must serve a 64K context (OLLAMA\_CONTEXT\_LENGTH=65536 there). AGENT\_ANTHROPIC\_API\_KEY: an Anthropic key for the agents only, not exported, so Claude Code keeps using your subscription. OPENROUTER\_API\_KEY stays commented until used |
+| `DEVSVC_AUTOSTART, DEVSVC_RAM_MB` | the shared services (setup, the devsvc command; not exported) | Optional, commented out | You. DEVSVC\_AUTOSTART: the services that start with Linux (default "redis memcached", "none" for none); the rest start on 'devsvc up'. DEVSVC\_RAM\_MB: the memory budget 'devsvc up' checks first (default 3000); DEVSVC\_FORCE=1 on one command overrides it |
+| `REDIS_PASSWORD, QDRANT_API_KEY, MONGO_ROOT_PASSWORD` | install-redis, install-qdrant, install-mongodb (setup, devsvc, lan, test, demo; not exported) | Optional, commented out; needed to share that service with install-lan-share | You. Empty means no login, which is fine on 127.0.0.1. Setup applies a change on every run (MongoDB's is written into the existing data); init reports a skip until it has |
+| `SOLR_PASSWORD, OPENSEARCH_ADMIN_PASSWORD, ELASTIC_PASSWORD, MEILI_MASTER_KEY, TYPESENSE_API_KEY` | install-search, install-elasticsearch (setup only; not exported) | Optional, commented out | You, only to pick your own before the first setup run with the flag; otherwise setup generates them. Either way they are kept in \~/.config/devsvc/devsvc.env (mode 600), which wins from then on, since the engines store them; 'devsvc password NAME' prints one. Init reports a skip when secrets.env and devsvc.env differ |
+| `MONGODB_ATLAS_PUBLIC_API_KEY, MONGODB_ATLAS_PRIVATE_API_KEY` | install-mongodb-atlas-local (the Atlas CLI) | Optional, commented out | cloud.mongodb.com, Organization Access Manager, API Keys. Only for hosted Atlas; Atlas Local needs no account. 'atlas auth login' in a browser works instead |
+| `CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID` | install-cloudflare (wrangler, dev-demo's cloud/cloudflare deploy) | Optional, commented out | dash.cloudflare.com, My Profile, API Tokens, template 'Edit Cloudflare Workers'; the account id is on the dashboard's Workers page. Or 'wrangler login' in a browser instead. 'wrangler dev' needs neither |
+| `APOLLO_KEY, APOLLO_GRAPH_REF` | install-graphql (init writes the key into Rover's profile; dev-demo's drupal-graphql connectors item; not exported) | Optional, commented out | GraphOS Studio: your user settings, API keys (or a graph API key); the graph ref is graph-id@variant. Never export APOLLO\_KEY: exported, every local router and MCP server reports to GraphOS, where the Free plan allows self-hosted routers 60 requests a minute |
+| `CYPRESS_RECORD_KEY` | install-cypress (only 'cypress run --record' uses it; exported) | Optional, commented out | Cypress Cloud: the project's settings, Record Keys; the projectId goes in the project's cypress.config. Local Cypress runs need no account (v91) |
+| `GITLAB_TOKEN_ONCE, DRUPALCODE_TOKEN_ONCE` | install-gitlab (init logs glab in to gitlab.com and git.drupalcode.org and uploads the SSH key to gitlab.com; not exported) | Optional, commented out | gitlab.com: Preferences > Access tokens, scopes api and write\_repository. git.drupalcode.org: a personal access token from your preferences there, if your account can create one; drupal.org's git SSH keys stay on your drupal.org profile (v91) |
+| `GITLAB_RUNNER_TOKEN_ONCE` | install-gitlab-runner (init registers the runner once, Docker executor, named after MACHINE\_LABEL) | Optional, commented out | A glrt- runner authentication token: a project's (or group's) Settings > CI/CD > Runners > New runner (v91) |
+| `GITLAB_MCP` | install-gitlab ("1": init adds GitLab's MCP server to Claude Code at user scope) | Optional, commented out | No key: the server's first use opens GitLab's OAuth login. It is in beta and on the Free tier; the top-level group must allow MCP access (v91) |
+| `KNIFE_CHEF_SERVER_URL` | install-chef (an existing Chef or Cinc server, with the organization: https://chef.example.com/organizations/myorg) | Optional, commented out | Only for a server you already use; local mode, Test Kitchen and InSpec need nothing (v91) |
+| `KNIFE_NODE_NAME` | install-chef (your user name on that server) | Optional, commented out | Your user (client) name on the server (v91) |
+| `KNIFE_CLIENT_KEY` | install-chef (the path to your user's .pem key) | Optional, commented out | Downloaded from the server when the user or key was made. With all three set, init writes knife's default profile once (v91) |
+| LAN\_TAILSCALE | install-lan, install-lan-share (v93) | Optional, commented out | You: 0 keeps the v84 relay and ChromeOS port forwards and installs no Tailscale; default 1 |
+| TAILSCALE\_AUTHKEY | install-lan (init joins the tailnet with it, v93) | Optional, commented out | You: an auth key from the Tailscale admin console (Settings > Keys), to join without a browser; not needed once joined |
+| RETRO\_EXCHANGE\_MB | install-retro (read when an exchange disk is made, v93) | Optional, commented out | You: 64-2047, default 1024; 512 for less disk. The same name on the command line wins for one run |
+| RETRO\_WIN95\_DISK\_MB | install-retro (read when win95's hdd.img is made, v93) | Optional, commented out | You: 512-8192, default 2048 |
+
+Init derives `GOOGLE_API_KEY` from `GEMINI_API_KEY`, so one Google key serves both `gemma_client.py` and `langchain-google-genai`. `LANGFUSE_BASE_URL` stays at `https://cloud.langfuse.com` unless you self-host on a 16 GB+ machine.
+
+The cloud key lines (v57) ship commented out and must stay that way until you set a value. botocore treats an exported empty `AWS_PROFILE` as a profile named `""` and fails, and google-auth errors on an empty `GOOGLE_APPLICATION_CREDENTIALS`. Uncomment only the lines you fill in.
+
+## Running init with an empty secrets file
+
+With no secrets filled in and no `noninteractive` flag, init walks through every login that has a CLI flow, so you can authenticate live when it reaches each one. In order:
+
+1. `gh auth login` — GitHub, browser.
+2. `codex login` — browser link.
+3. `hf auth login` — paste a Hugging Face token at the prompt.
+4. `eas login` — Expo.
+5. `aws configure sso` — start URL and region, then browser.
+6. `az login --use-device-code` — code entered on any device.
+7. `gcloud auth login`, then `gcloud auth application-default login` — browser, twice.
+8. `vercel login` — browser (v67).
+
+Two kinds of item cannot be prompted for and land in the todo list at the end instead:
+
+- API keys with no login command: `GEMINI_API_KEY`, the Langfuse pair, the Pantheon and Acquia tokens, the Jev keys (`TYPESAFE_API_KEY` or `AI_GATEWAY_API_KEY`), and `GIT_NAME` / `GIT_EMAIL`. These only ever come from `secrets.env`.
+- Claude Code: init never calls `claude`; run it once yourself, since that login is a full terminal session.
+
+The practical minimum to type into `secrets.env` is therefore name, email, the Gemini key and the two Langfuse keys; everything else can be done at the prompt.
+
+## Credentials by service
+
+The minimum trip for `install-all` is GitHub, Google AI Studio, Hugging Face and Langfuse; Anthropic, OpenAI, Expo, the three cloud CLIs and Vercel each have an interactive fallback.
+
+### GitHub (base)
+
+1. [github.com](https://github.com) → profile menu → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token.
+2. Scopes: `repo`, `read:org`, `admin:public_key`. The last one lets init upload (since v92 init first asks GitHub itself with ssh -T, on port 22 and then on ssh.github.com port 443, so a key you added in the web UI counts as done, and a token without the scope gets 'gh auth refresh -h github.com -s admin:public\_key' as its todo) `~/.ssh/id_ed25519.pub` to your account.
+3. Pick an expiry, copy the token once, paste into `GH_TOKEN_ONCE`.
+4. Alternative: leave it empty and answer the interactive `gh auth login` in the browser.
+
+### Google AI Studio (install-gemma, install-agentic)
+
+1. [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → Create API key.
+2. Pick or create a Google Cloud project when asked; the default project is fine.
+3. Paste into `GEMINI_API_KEY`.
+
+### Hugging Face (install-gemma)
+
+1. [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) → Create new token → type *Read* → copy.
+2. Open the Gemma 4 model page (search `google/gemma-4`) and click *Agree and access repository* on the gated-model banner. The token alone does not unlock gated weights; without this step the Transformers path returns 403.
+3. Paste into `HF_TOKEN`. Ollama needs none of this.
+
+### Langfuse (install-agentic)
+
+1. [cloud.langfuse.com](https://cloud.langfuse.com) → sign up (GitHub login is quickest) → New organization → New project. The free Hobby tier is enough.
+2. Project → Settings → API Keys → Create new API key. Copy both `pk-lf-…` and `sk-lf-…` now; the secret is shown once.
+3. Paste into `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`; leave `LANGFUSE_BASE_URL` as is.
+
+### Anthropic (install-node, install-agentic) — optional
+
+- Leave `ANTHROPIC_API_KEY` empty to use the Claude subscription in Claude Code; run `claude` once after init and finish the browser login.
+- Set it only for API billing or `langchain-anthropic`: [console.anthropic.com](https://console.anthropic.com) → API Keys → Create Key.
+
+### OpenAI (install-node) — optional
+
+- Leave `OPENAI_API_KEY` empty and run `codex login` for the ChatGPT-account flow.
+- Or create a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+
+### Gemini CLI and aider (install-node)
+
+- Gemini CLI: run `gemini` once and sign in with a Google account (credentials land in `~/.gemini`), or let it use the `GEMINI_API_KEY` above. Init reports whichever it finds.
+- aider has no login of its own: it uses `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY`, whichever is set. With none, run it against local Ollama: `aider --model ollama_chat/gemma4:e2b-it-qat`.
+
+### Expo / EAS (install-rn via install-mobile) — optional
+
+- [expo.dev](https://expo.dev) → sign in → Account settings → Access tokens → Create token → paste into `EXPO_TOKEN`.
+- Or leave it empty and `eas login` prompts.
+
+### AWS (install-aws)
+
+1. Preferred path is IAM Identity Center, with no keys to copy. Have your Identity Center start URL and region ready (from your AWS access portal).
+2. Init runs `aws configure sso`, which asks for those two values and opens a browser.
+3. Afterwards put the profile name you chose in `AWS_PROFILE` and uncomment it, so every shell and boto3 use it. Expired SSO sessions are refreshed by rerunning init.
+4. Static keys are a fallback only: IAM console → Users → Security credentials → Create access key → paste into the two `AWS_ACCESS_*` lines and uncomment them.
+
+### Azure (install-azure)
+
+1. Interactive: init runs `az login --use-device-code`; open the URL it prints on any device and enter the code.
+2. Set `AZURE_SUBSCRIPTION_ONCE` to a subscription name or id to make it the default.
+3. Service principal, for headless use only: Azure portal → Microsoft Entra ID → App registrations → New registration → Certificates & secrets → New client secret. Copy the tenant id, the application (client) id and the secret value into the three `AZURE_*` lines and uncomment them.
+
+### Google Cloud (install-gcp)
+
+1. Interactive: init runs `gcloud auth login` and then `gcloud auth application-default login`; both open a browser. The second one is what the google-cloud-\* SDKs and Terraform's google provider use.
+2. Set `GCP_PROJECT_ONCE` to the project id shown on the Cloud Console dashboard.
+3. Service-account key, for headless use only: Console → IAM & Admin → Service Accounts → Keys → Add key → JSON. Save it under `~/.config` and set `GOOGLE_APPLICATION_CREDENTIALS` to the path, uncommented.
+
+### Vercel (install-vercel)
+
+1. Interactive: init runs `vercel login`, which opens a browser. That is all most machines need.
+2. Token, for unattended use only: vercel.com/account/tokens → Create. Uncomment `VERCEL_TOKEN` and paste it. An exported token overrides the saved login in every shell, so leave the line commented otherwise.
+
+### Jev / TypeSafe AI (install-jev)
+
+One key is enough; the two routes reach the same model.
+
+1. Direct: console.typesafe.ai → Settings → Keys → paste into `TYPESAFE_API_KEY`. Early access is waitlisted, so this may take a while to open up.
+2. Through Vercel: dashboard → AI Gateway → API keys → create → paste into `AI_GATEWAY_API_KEY`. Available as soon as you have a Vercel account, and the same key reaches every other model behind the gateway.
+3. Rerun init, then the test script with install-jev: it makes a live call on each route that has a key.
+
+### Pantheon, Acquia, Upsun (install-drupal)
+
+All three platforms are optional. Setup installs the CLIs without any credential, and init reports an unconfigured platform as a skip rather than a todo, so nothing here blocks a clean install; add a token whenever you are ready and rerun init. These tokens reach every site your account can, client production included. Name each one after the machine (the same name as `MACHINE_LABEL`) so one machine's access can be revoked alone.
+
+1. Pantheon: dashboard.pantheon.io → Account → Machine tokens → Create token → paste into `TERMINUS_MACHINE_TOKEN_ONCE`. Terminus has no browser login, so this is the only route.
+2. Acquia: cloud.acquia.com → profile menu → Account settings → API Tokens → Create token → paste the key and the secret into `ACQUIA_API_KEY_ONCE` and `ACQUIA_API_SECRET_ONCE`. The secret is shown once.
+3. Upsun, only if you have projects there: console.upsun.com → My profile → API tokens → uncomment `UPSUN_CLI_TOKEN` and paste. Or skip the token and run `upsun login`.
+4. Run init with install-drupal. It logs Terminus and acli in, uploads `~/.ssh/id_ed25519.pub` to Pantheon and Acquia (git and remote Drush use SSH on both), and copies the working tokens into DDEV's global config so `ddev pull pantheon` and `ddev pull acquia` can authenticate. That file is then set to mode 600, since DDEV writes it world-readable.
+
+### Local and cloud models (install-ollama, v77)
+
+All optional; init reports each as a skip until you set it.
+
+1. Another machine's Ollama: on that machine set `OLLAMA_HOST=0.0.0.0:11434`, allow port 11434 on its private network, then put its address with the port in `OLLAMA_REMOTE`. Init checks that it answers; `ollama-remote list` uses it.
+2. Cloud models through the local CLI (for example `deepseek-v4.1-flash:cloud`, billed per token): run `ollama signin` once. It prints a link to open in the browser, so init cannot do it for you.
+3. Direct calls to ollama.com's API: a key from ollama.com/settings/keys in `OLLAMA_API_KEY`.
+4. DeepSeek's own API: a key from platform.deepseek.com in `DEEPSEEK_API_KEY`.
+
+### InterBase (install-interbase)
+
+The Developer Edition server refuses to start until it is registered. Init does it when port 3050 is not answering.
+
+1. Download InterBase for Linux (free Developer Edition) from Embarcadero and keep the serial number from the email.
+2. Put the zip in the assets folder and run setup with `install-interbase`.
+3. Run init with `install-interbase` interactively: it opens InterBase's console License Manager (serial number, then your Embarcadero login) (it prints the keystrokes first: 2 Direct register, the serial, Y, your login, then 4 Save and 5 Exit) and starts the server once with ib-server (since v92: it stops a stuck server first, waits up to 20 s, shows the log when the start fails and leaves nothing spinning; setup no longer starts an unregistered server), which runs `ibmgr -start -forever`. With `noninteractive` this is a todo.
+4. Optional: change SYSDBA's password with `gsec` and put the new one in `INTERBASE_SYSDBA_PASSWORD`.
+
+Since v93 setup runs `ldconfig` right after the InterBase install and gives the installer's root-only `ibmgr` the execute bit, and ib-server and init check it through sudo too: v92 read that mode as "not installed" and asked to register an InterBase that was already registered.
+
+The server does not start with Linux by itself; rerun init, or `ib-mgr -start -forever`, after a restart.
+
+### SQL Server and Oracle (install-db-server)
+
+Nothing to register: setup generates a password for each container, and `~/.local/bin` gets the `mssql` and `oracle` commands.
+
+1. Optional, before the first setup run with the flag: uncomment `MSSQL_SA_PASSWORD` or `ORACLE_PWD` in `secrets.env` to pick your own. A password only takes effect when the database is first created.
+2. Run setup with `install-db-server` (or `install-mssql` / `install-oracle` alone). The containers are created but left stopped.
+3. `mssql up` or `oracle up` starts one and waits until it answers; Oracle's first start takes a few minutes (since v93 the first 'oracle up' of a new data volume also sets the database's passwords with the image's setPassword.sh, because the Lite image never applied ORACLE\_PWD), and `DEVDB_WAIT` (default 900 seconds) bounds the wait. Then `mssql sql` / `oracle sql` open sqlcmd / SQLcl, `status`, `logs` and `password` report, and `down` stops it.
+4. Changed a password inside the database (`ALTER LOGIN sa` / `ALTER USER system`)? Put the new one in `secrets.env` so the commands, test and demo still log in.
+
+### LDAP (install-ldap, install-ldap-full)
+
+Nothing to log in to: setup creates the directories with their own passwords and keeps them in `~/.config/devldap/ldap.env`.
+
+1. To choose the base DN or any password yourself, uncomment its line in the LDAP section of `secrets.env` before the first setup run with the flag. For OpenLDAP the base DN must be dc=... parts only.
+2. After setup, `ldap status` shows both directories and `ldap passwords` the passwords.
+3. `ldap login alice` checks a sample password; `ldap ui` opens lldap's web UI (admin, for people and groups).
+4. `ldap drupal` prints the values for Drupal's LDAP server form; dev-demo's drupal/drupal-ldap site sets them up in DDEV.
+
+### Laptop network (install-lan, install-lan-share)
+
+> **Not in v1.** install-lan and install-lan-share are not yet supported on WSL: they wait for the Tailscale decision (Q8). This section is the Chromebook bundle's, kept for when they are ported.
+
+Nothing to log in to. Init writes the address book into /etc/hosts and applies LAN\_SHARE to the relay; the one manual step is outside Linux.
+
+1. Since v93: let init join each laptop to your tailnet (the browser login, or TAILSCALE\_AUTHKEY) and turn off key expiry for it in the Tailscale admin console; then fill in `LAN_HOSTS` with the same list on every laptop (the 100.x addresses 'tailscale status' lists; a laptop not on Tailscale keeps its home address, reserved on the router), and `MACHINE_LABEL` (or `LAN_SELF`) with this laptop's name in it.
+2. On a laptop that serves, set `LAN_SHARE` and rerun init (or `lan share apply`).
+3. Only with LAN\_TAILSCALE=0 (the v84 relay): add each port `lan share ports` lists in ChromeOS: Settings > Advanced > Developers > Linux > Port forwarding > Add, type TCP (search Settings for "port forwarding" if your ChromeOS files it elsewhere).
+4. Run `lan scan` on another laptop, or (v93) 'lan probe NAME', which checks each shared service there in its own protocol. In relay mode init keeps each relayed port on its to-do list until a connection from another laptop has come through it; dev and MCP ports stay skips, since init cannot see those.
+
+Anyone on the same Wi-Fi reaches a forwarded port, and Ollama has no login: run `lan share off` on any network that is not yours. A guest network or a router with client isolation keeps laptops apart whatever the scripts do.
+
+### Personal agents (install-hermes, install-openclaw)
+
+Nothing to log in to: init gives each agent a model from secrets.env. Both need a 64K-token context, more than the bundle's local models are set up for, so use a cloud key or a bigger machine's Ollama.
+
+1. Fill in `AGENT_ANTHROPIC_API_KEY` (the agents' own key: `ANTHROPIC_API_KEY` works too, but it is exported to every shell, where Claude Code then bills the API instead of your subscription) or `OPENROUTER_API_KEY`, or `OLLAMA_REMOTE` plus `AGENT_MODEL`, and rerun init. Hermes gets the key in `~/.hermes/.env`; OpenClaw is onboarded without prompts and set to ask before running a shell command.
+2. Init changes only a model it set itself. A model you pick with `hermes model` or `openclaw models set` stays; `hermes config set model.provider auto` hands Hermes back to init.
+3. Manual, when you want them: Nous Portal (`hermes portal`), messaging (`hermes gateway setup`, `openclaw channels add`) with bot accounts made for it, and the always-on services (`hermes gateway install`, `openclaw gateway install`).
+
+An agent runs as you and can read your files, secrets.env included, and this user has passwordless sudo (the host script's drop-in): Hermes asks before a risky command, and init makes OpenClaw ask before any command not on its allowlist. Read a ClawHub skill before `openclaw skills install`: malicious ones have been found there.
+
+### Shared services (install-cache, install-search, install-vector, install-mongodb, v89)
+
+Nothing to log in to: every service runs on this machine, on 127.0.0.1. Logins and keys live in `~/.config/devsvc/devsvc.env` (mode 600); `devsvc password NAME` prints one and `devsvc info NAME` the connection values for DDEV, Drupal, Laravel, Symfony, Python and Node.
+
+1. Before the first setup run, optionally set `REDIS_PASSWORD`, `QDRANT_API_KEY` and `MONGO_ROOT_PASSWORD` (applied on every run) and any of the five search logins (used only when an engine is first created; generated otherwise).
+2. Redis and Memcached start with Linux; start the others when needed: `devsvc up solr`, then `devsvc down solr`. `devsvc fits NAME` says whether one fits the memory budget right now.
+3. With install-lan-share, add the service to `LAN_SHARE` only once its login is set: init lists a service it left out as a to-do naming the key.
+
+### Cloudflare (install-cloudflare, v89)
+
+`wrangler dev` runs Workers and D1 locally with no account. To deploy, set `CLOUDFLARE_API_TOKEN` (and `CLOUDFLARE_ACCOUNT_ID` when the token covers several accounts) and rerun init, or run `wrangler login`. A rejected token is a to-do; no account is a skip. cloudflared (install-cloudflared) needs no login for a quick tunnel; `cloudflared tunnel login` is only for named tunnels.
+
+### Apollo GraphOS (install-graphql, v90)
+
+Optional: `rover dev`, `rover supergraph compose`, the router and `apollo-mcp-server` work locally with no account, and an empty `APOLLO_KEY` is a skip. With a key in `secrets.env`, init writes it into Rover's default profile (`~/.config/rover/profiles/default`, mode 600) and checks it with `rover config whoami`: a rejected key is a to-do, GraphOS out of reach is a skip. Keep `APOLLO_KEY` unexported; init reports a to-do if the environment, `secrets.env` or `~/.bashrc` exports it. `APOLLO_GRAPH_REF` matters only for Apollo Connectors in `rover dev` (dev-demo's drupal-graphql `connectors` item).
+
+### Test tools (install-testing, install-cypress)
+
+Nothing to log in to: Playwright, Selenium, the Gherkin runners, Robot Framework and Cypress all run locally. Init reports what setup left: Playwright's three browsers (missing ones are a to-do), Selenium Manager's chromedriver for the current Chrome (missing is a skip; the next run fetches it), Reqnroll's templates when .NET is installed, and `robot` and `rfbrowser` in `~/.local/bin`. The Selenium Grid shows in the shared-services report (`devsvc up selenium` starts it). `CYPRESS_RECORD_KEY` is optional and only matters for Cypress Cloud recording; empty is a skip. Playwright MCP is added to Claude Code per folder, not by init: dev-demo's e2e-bakeoff `mcp` item does it.
+
+### GitLab (install-gitlab, install-gitlab-runner)
+
+Optional: glab and gitlab-ci-local work without an account, and a missing token is a skip. With `GITLAB_TOKEN_ONCE`, init logs glab in to gitlab.com (`glab auth login --stdin`, SSH as the git protocol) and uploads `~/.ssh/id_ed25519.pub`; with `DRUPALCODE_TOKEN_ONCE`, it adds git.drupalcode.org as a second host. An existing login is kept; a rejected token is a to-do. `GITLAB_RUNNER_TOKEN_ONCE` registers the runner once (`gitlab-runner register --non-interactive`, Docker executor), after which init reports it as registered. `GITLAB_MCP=1` adds GitLab's MCP server (`https://gitlab.com/api/v4/mcp`) to Claude Code; its OAuth login comes on first use. GitLab itself is not installed: it needs 8 GB of RAM, more than the Linux container gets.
+
+### herdr (install-herdr, v95)
+
+No account and no key. Init installs herdr's integration for each supported agent on PATH (`claude`, `codex`; also `hermes`, Antigravity's `agy` and `cursor-agent` when installed) with `herdr integration install <agent>`, when `herdr integration status` doesn't show it as current. The integration is a hook in the agent's own config: for Claude Code, `~/.claude/hooks/herdr-agent-state.sh` and hook entries in `~/.claude/settings.json`. An agent's config folder appears on its first run, so until you have started it once that integration is a skip ("start claude once, then rerun init"), not a to-do. herdr's own settings stay its defaults (`~/.config/herdr/config.toml` once you change one); `herdr --default-config` prints them. Gemini CLI and aider are not on herdr's integration list: they run in herdr panes, without state tracking or session restore. See tmux and herdr under Running setup for the shared Ctrl+B prefix.
+
+### Puppet and Chef (install-puppet, install-chef)
+
+Nothing to log in to: both run masterless here (`puppet apply`, Bolt, `cinc-client -z`). Init reports the OpenVox, facter, OpenBolt and Cinc versions; a missing command is a to-do, and so is an enabled `puppet` service. With `KNIFE_CHEF_SERVER_URL`, `KNIFE_NODE_NAME` and `KNIFE_CLIENT_KEY` all set, init writes knife's `[default]` profile to the `credentials` file in Cinc's knife folder (mode 600), never over an existing `[default]`, then tries `knife node list`; for a self-signed server certificate run `knife ssl fetch` first.
+
+## Windows settings
+
+What is set outside Linux is set by `dev-host-wsl.ps1`, on Windows:
+
+- [ ] `%USERPROFILE%\.wslconfig`: WSL's memory ceiling (about 75% of host RAM), swap, and `sparseVhd=true`. It applies to every distro on the laptop. In a file that was already there the script only adds missing keys and reports a key that has another value; change those by hand if you want the bundle's values, then `wsl --shutdown`.
+- [ ] Disk: the distro's disk is a file on the Windows drive. `df` inside Linux reads its virtual size, so the bundle's disk guards also read the Windows drive and use the smaller figure. Space freed in Linux returns to Windows when the disk is sparse, otherwise after compacting it (wsl-gotchas.md).
+- [ ] Docker Desktop, if it is installed: its WSL integration must be off for this distro (Settings > Resources > WSL integration). The bundle uses docker-ce inside the distro, and setup stops while the integration is on.
+- Android: **not in v1.** There is no Android runtime beside WSL, `adb connect arc` is gone, and install-android-native is not yet supported on WSL (Android Studio comes later, on Windows). install-mobile still installs the SDK, NDK and Flutter; init says "no Android device in v1".
+
+Docker group membership is handled by setup; run `newgrp docker` or open a new terminal for it to take effect (or restart the distro from Windows: `wsl --terminate <distro>`).
+
+## GUI first-runs
+
+None of these can be scripted; do them once, in any order. Init's still-manual list at the end names the ones it can check (Claude Code, Codex, Android Studio, the Langfuse keys, and the cloud logins under noninteractive). Antigravity (reported as a skip since v81, as sign-in happens in the app), drupal.org (a skip), the editors and Godot never appear there.
+
+- [ ] Claude Code: run `claude` in a terminal and finish the browser login (subscription) — skip if you set `ANTHROPIC_API_KEY`.
+- [ ] Codex: run `codex login` for the ChatGPT-account flow — skip if you set `OPENAI_API_KEY`.
+- Android Studio: **not in v1** (install-android-native is not yet supported on WSL). On the Chromebooks: launch from the app drawer, accept the wizard defaults, point it at the existing SDK at `~/.android/sdk` if asked, skip the emulator. With ADB debugging enabled, the Chromebook appears as a connected device. Since v70 setup pins it to the X11 toolkit (`-Dawt.toolkit.name=XToolkit` in its VM options): its bundled runtime defaults to native Wayland, which on ChromeOS dims the IDE window whenever it has focus. If the window ever dims again after an Android Studio update, check Help → Edit Custom VM Options for that line.
+- [ ] Antigravity: launch Antigravity IDE (or Antigravity) from the app drawer, or run antigravity-ide, and sign in with your Google account. The CLI is `agy` at `~/.local/bin/agy`; the Python SDK venv is activated with `source ~/.antigravity-env/bin/activate`.
+- [ ] Cursor, Windsurf, VS Code: sign in only if you want their AI features; nothing else depends on it. Cursor has its own Start menu entry (it ships as a bare AppImage, so it had none); if it is not there yet, give the Start menu a minute, then try `wsl --shutdown` from Windows and a new session.
+- [ ] Devin Desktop (install-windsurf; Windsurf's new name, v96): open **Devin (X11)** from the Start menu, not the stock Devin entry (under WSL setup cannot hide the stock one, so both show; whether the stock one works under WSLg is a first-run check). It runs `~/.local/bin/devin-desktop`, which starts `/usr/bin/devin-desktop --ozone-platform=x11`: on ChromeOS's Wayland the window froze at sign-in or closed (Oct 26 2026), and an icon that ran the Electron binary directly crashed within seconds. `devin-desktop` in a terminal is the same wrapper. Click Login once and give it 20–30 s; the page opens in the Windows browser. Devin needs about 2 GB of headroom (`devmem` shows where memory went). Whether its sign-in comes back from the Windows browser is a first-run check (wsl-gotchas.md, editor sign-ins). Command-line extension changes (`--install-extension`, `--uninstall-extension`, `--list-extensions`) act on Devin's built-in Default profile unless given `--profile <name>`; onboarding's VS Code import makes a profile *named* "default" (the names are under `userDataProfiles` in `~/.config/Devin/User/globalStorage/storage.json`). CodeLLDB's Linux add-on doesn't install from Open VSX in Devin ("command not found": Devin lacks `installFromVSIX`), so install `codelldb-linux-x64.vsix` from CodeLLDB's GitHub release with `devin-desktop --profile <name> --install-extension <file>`. Setup installs and removes no Devin extensions. **Machines set up before v96:** rerun setup with install-windsurf, then shut Linux down once (right-click the Terminal icon, Shut down Linux) so the launcher picks up the new entry.
+- [ ] Lazarus (v94): in each profile pick an editor color scheme (Tools → Options → Editor → Display → Colors; e.g. Twilight in **Lazarus (Dark)**, Default in **Lazarus**), and in the dark profile the Object Inspector colors (Tools → Options → Environment → Object Inspector). Install IDE packages from the IDE itself (Package menu, or when a project asks); since v95 the layout survives it, and `lazmode dock on|off` rebuilds the other layout before switching (see Lazarus under Running setup).
+- [ ] Godot: launch Godot Engine or Godot Engine (.NET) from the app drawer. When creating a project choose the Compatibility renderer; Forward+ and Mobile need Vulkan, which the Linux container does not expose.
+- [ ] drupal.org: add `~/.ssh/id_ed25519.pub` at git.drupalcode.org → user settings → SSH keys. Issue forks and merge requests push over SSH, and there is no API for it, so init can only check. The test script warns until `ssh -T git@git.drupal.org` greets you.
+- [ ] Langfuse: `cp ~/agentic/.env.example ~/agentic/.env` and fill in the same Langfuse keys there for the agentic project (init sets them in the shell; the project reads its own `.env`).
+- [ ] Cloud logins run inside init itself (browser or device code); with `noninteractive` they land in this todo list instead: `aws configure sso`, `az login --use-device-code`, `gcloud auth login`, `gcloud auth application-default login`, `vercel login`.
+
+## Nothing to configure
+
+These install and work with no account, key or setting: Docker, Homebrew, ddev, gh (binary only), mkcert, Google Chrome, Rust and wasm-pack, Go, PowerShell, Ruby and Jekyll, Lazarus, Flatpak with HandBrake and KDiff3, all database and ODBC drivers (msodbcsql18, pxlib, SQLite, PostgreSQL, MariaDB, DuckDB with the `CSV` DSN), the lakehouse stack (DuckDB CLI with Iceberg, DuckLake and Delta Lake, delta-rs, dbt Fusion, dbt Core via `dbt1`), Temporal (`tsdb` alias), and Ollama with `gemma4:e2b-it-qat`.
+
+**DuckDB (v98, `install-lakehouse` / `install-db-extra`):** one version variable in setup pins the CLI,
+`~/.lakehouse-env`'s `duckdb==1.5.6`, and ODBC (driver release `v1.5.6.0`) to the same engine.
+Classic dbt stays on `dbt-core<2`; Fusion uses its own driver. Revisit 2.0 when Fusion states support,
+since older engines cannot read new 2.0-format files. Each flag works on its own. Reruns probe the
+installed CLI/ODBC engine: a matching version prints "current; no archive download"; pip's exact
+DuckDB requirement is already satisfied then.
+
+Downloads read GitHub's asset digest from that exact tag's release metadata at run time: logged-in
+`gh api` first, unauthenticated curl otherwise (or if gh's request fails). No login/token is required,
+and no digest is hardcoded. Missing/invalid digests, rate limits and failed downloads stop with an
+error: restore network/API access and rerun the same flags. Archives and their members are validated,
+then the staged CLI/ODBC version and in-memory query are checked before replacement. Temporary
+staging under `assets/` is removed on success and failure. Dev-test checks CLI/Python version equality
+and the pinned ODBC engine, as well as the existing extension, DuckLake, Delta and dbt checks.
+
+To verify this change, run setup with `install-lakehouse install-db-extra` twice; the second run
+downloads no DuckDB CLI or ODBC archive. Then run dev-test with the same flags and inspect its summary
+and `assets/logs/` output files. The normal init → setup → init → test order is unchanged; there are
+no new secret variables or manual logins for these flags.
+
+Terraform, tflint and Bicep (install-iac, v57): init writes `plugin_cache_dir` into `~/.terraformrc` so providers download once instead of per project. State backends and provider credentials are per project and use the cloud logins above. Bicep is installed via `az bicep` only when install-azure is also present.
+
+Ansible (`install-ansible-full` via install-iac, or `install-ansible-core`, v76) has no account to log in to. Init only checks the optional `ANSIBLE_VAULT_PASSWORD_FILE`, tightens it to mode 600, and reports skip when it is unset. Docker containers need nothing as targets; for an SSH host run `ssh-copy-id -i ~/.ssh/id_ed25519.pub user@host` once. Collections a project needs beyond the installed set go in its `requirements.yml` (`ansible-galaxy collection install -r requirements.yml`); a copy in `~/.ansible/collections` takes precedence over the bundled one.
+
+Update Ansible by rerunning setup with the same flags, not with `pipx upgrade-all`: that upgrades ansible-core alone, past the version the community package pins, and the test's `pip check` then fails. Once `ANSIBLE_VAULT_PASSWORD_FILE` is uncommented, the file must exist and must not be executable unless it is a script: Ansible runs an executable password file. Init and the test both check this.
+
+Ollama (`install-ollama`, v77) needs no account for local models. Init only makes sure the service starts with Linux. To change a server setting, use `sudo systemctl edit ollama`; don't edit setup's `dev-setup.conf`, which is rewritten on every run. The override wins, and the test reports a changed value as a pass with a note. The curated models (`install-models`) are listed in `assets/ollama-models.txt`, which the test and demo scripts read. Set `OLLAMA_TEST_CLOUD=1` before the test to also make one live `:cloud` call (after `ollama signin`; a fraction of a cent).
+
+The test reports four INFO lines for the models: where the model ran, its speed, its context length, and the KV-cache line from Ollama's log (q8\_0 applies only with flash attention; a model that falls back to f16 shows it there). Up to two models stay loaded, so a RAG loop keeps its embedding and chat models side by side when memory allows; Ollama unloads an idle one first when it does not. Loaded models hold RAM for five minutes, so run 'ollama stop \<model>' before kind or a Gradle build. For strictly one at a time, set `OLLAMA_MAX_LOADED_MODELS` to 1 with `sudo systemctl edit ollama`.
+
+Firebird (part of `install-db` since v80) needs no account: embedded access has no server and checks no password, so `ISC_USER=SYSDBA isql-fb /path/file.fdb` opens any file you can write. If Firebird's shared lock directory is not writable for you, setup adds `FIREBIRD_LOCK=~/.cache/firebird-lock` to `~/.bashrc`; every program opening the same file must use it.
+
+SQL Server and Oracle (`install-db-server`, v82) each hold about 2 GB while running and Linux gets about 6.4 GB, so `mssql up` stops Oracle first and the reverse (`DEVDB_BOTH=1` runs both). Both listen on 127.0.0.1 only, and Oracle Free allows one instance per machine. Data lives in the volumes `devdb-mssql-data` and `devdb-oracle-data` (devdb-oracle-full-data on the full image), which survive reruns and image updates; to start over, `docker rm -f devdb-mssql && docker volume rm devdb-mssql-data` and rerun setup (the same for oracle). On dragonair's 64 GB disk, watch the roughly 3 GB images: `demo-clean` does not remove them.
+
+The full Oracle image (`install-oracle-full`, v83) needs about 13 GB free (the image plus the copy of its built-in database that goes into the new volume) on top of `DEV_DB_MIN_FREE_GB`; setup keeps the Lite container when it can't pull it, and init lists that as a todo. After the move, `docker volume rm devdb-oracle-data && docker rmi container-registry.oracle.com/database/free:latest-lite` reclaims the Lite database and image once you no longer need them. `oracle sql` then `SELECT comp_id, comp_name FROM dba_registry;` shows which components a database has.
+
+LDAP (`install-ldap`, `install-ldap-full`, v83) needs no account. lldap restarts with Linux until `ldap down`; slapd is a service that starts with Linux. After `ddev poweroff`, `ldap up` puts lldap back on DDEV's network. Start over (deletes the directories): `docker rm -f devldap-lldap && docker volume rm devldap-lldap-data`, for full also `sudo apt purge -y slapd && sudo rm -rf /var/lib/ldap /etc/ldap/slapd.d`, then remove `~/.config/devldap/ldap.env` and rerun setup.
+
+The laptop network (`install-lan`, `install-lan-share`, v84) is off until you fill in secrets.env: an empty `LAN_SHARE` shares nothing. The relay passes connections from this Linux's network address to 127.0.0.1, so the services keep their own settings and nothing is recreated; `lan share` shows each port, whether its service runs, and whether another laptop has reached it yet. DDEV sites on another laptop: `lan site <laptop> <site>`, then https://\<site>.ddev.site:8443 (that laptop's mkcert certificate, so the browser warns). Vite and Angular accept an address rather than a name unless their allowedHosts says otherwise.
+
+**Not in v1** (not yet supported on WSL). On the Chromebooks: since v93 the laptops talk over Tailscale: Linux on these Chromebooks now runs as a full VM with no ChromeOS port forwarding. Setup installs Tailscale in normal mode, init joins the laptop, `lan share apply` publishes LAN\_SHARE with `tailscale serve`, and `lan probe NAME` / `lan path NAME` check another laptop's services and route. Ollama on another laptop: `http://NAME.internal:11434`. `LAN_TAILSCALE=0` in `secrets.env` keeps the v84 relay.
+
+COM and retro (`install-com`, `install-retro`, v85) need no accounts. COM registers into a local Wine prefix (`~/.local/share/wine/com`); `wine-com` runs programs in it, and widl + mingw build a server that `regsvr32` registers and `CoCreateInstance` activates, in-process or out-of-process — the same activation path DCOM uses across machines, whose server side belongs on a Windows laptop. Retro builds DOS 16/32-bit (run in DOSBox-X) and Win16/Win32/Win64 (run under Wine) from Open Watcom and mingw; put Windows 3.1x media in `~/win31/install/windows` and installers like Delphi 1 in `~/win31/install/apps`, then `win31 setup`.
+
+**Not in v1** (not yet supported on WSL). On the Chromebooks: since v92 the retro guests need no account either, only your media and keys. Init reports each one as a skip (you may want only some): `win31` media in `~/win31/install/windows`, the Windows 95 CD's `.iso` in `~/win95/install` (OSR2 asks for the OEM key, `xxxxx-OEM-xxxxxxx-xxxxx`), the NT 4.0 and 2000 CD `.iso` files in `~/winnt40/install` and `~/win2000/install` (service-pack `.iso` files there become a second CD), then `<cmd> setup`. A setup refused for disk space says so in init and in `retro`. KVM is a todo only when `/dev/kvm` exists and the group that owns it (kvm on Debian) is not active yet (shut Linux down and reopen it); auto/kvm falls back to TCG without usable `/dev/kvm`, while new win2000 defaults explicitly choose TCG regardless of availability. At the NT login, `winnt40 keys ctrl-alt-del` (ChromeOS keeps the real keys). Delphi 1 under Wine: `delphi1 setup` (its SETUP.EXE in `~/win31/install/apps`), then `delphi1` or its launcher icon; it turns Integrated debugging off and sets the editor font (Courier New 10) in `DELPHI.INI`, which lives in `C:\WINDOWS`, by itself, and `delphi1 ini save` keeps any other options you change. Fonts for the other guests: `<guest> fonts` puts the core fonts and Tahoma in `C:\FONTS` (win31) or `D:\FONTS`, with a README on installing them and on font smoothing (grayscale at most: ClearType began with Windows XP). The Wine route has no integrated debugger, no Database Desktop and no BDE table access: those stay in `win31`. The steps are in `~/dev-demo/retro/matrix/STEPS-delphi1.md` and `STEPS-winnt.md`.
+
+Since v96, `delphi N build PROJECT.dpr` compiles a Delphi 3–7 project with that version's `dcc32.exe` under Wine, console only, from the project's folder, so it reads the `.dpr` and the `.cfg` the IDE writes next to it (search paths, defines) and builds what the IDE would; Wine's `Z:\` and `C:\` paths in its messages become Linux paths. `delphi N vscode [dir]` writes `.vscode/tasks.json` with that build as the default build task (dcc32's errors land in Problems) and a run task (`delphi N run <Project>.exe`, in the Delphi desktop with its fonts), plus `extensions.json` (Pascal). There is no debugging from the editors, and no `launch.json`: Delphi writes Borland's own debug format, which gdb and lldb can't read, and Wine's debugger is minimal, so debugging stays in the Delphi IDE (Wine, or the real Windows guests). A Delphi project converted by Lazarus (Tools → Delphi Conversion) becomes a Lazarus project, with `lazmode vscode`'s build and debug.
+
+Since v93: program CDs (`.iso`) go in `~/<guest>/install/apps` and are F: in every guest (`<guest> cd list`, `<guest> cd NAME`; winnt40 and win2000 swap it while running, `cd --windows` swaps their Windows CD). The exchange disk is 1 GB and win95's disk 2 GB by default; set `RETRO_EXCHANGE_MB` (64-2047, 512 for less disk) and `RETRO_WIN95_DISK_MB` (512-8192) in `secrets.env` before the disk exists, or on the command line for one run (`RETRO_EXCHANGE_MB=512 win2000 setup`); `retro sizes` shows them, and `<guest> exchange recreate` rebuilds an exchange disk at a new size. `win95 snapshot save|restore|list|delete` keeps undo points. Delphi 3, 4, 5, 6 and 7 under Wine (Delphi 5 reports Windows 2000, and its real guest is win2000, as for 6 and 7): the CD in `~/delphi/install/N`, then `delphi N setup` and `delphi N`; init lists each as a skip. Which Delphi goes in which guest: `STEPS-delphi.md` in the same folder.
+
+The personal agents (`install-hermes`, `install-openclaw`, v86) run as `hermes` and `openclaw chat` once init has given them a model. The test needs no key: each agent answers one prompt from a stand-in model on this machine, and OpenClaw's gateway is checked to stay on loopback and refuse a wrong token. `AGENT_TEST_LIVE=1` adds one real prompt per agent. WSL's VM stops when it is idle or Windows sleeps, so a messaging bot here is not reachable around the clock.
+
+Docker containers reach Ollama only after setup runs with `install-ollama-containers` (v80); init reports which way it is. DDEV's Drupal AI demo (`drupal-rag`) needs that and the `install-models` models.
+
+Angular, corepack and Composer need no accounts either: init only turns Angular CLI analytics off, and `corepack use pnpm@latest` pins a package manager per project. kubectl, helm, kind and k9s have no login of their own — kind writes `~/.kube/config` when you create a cluster, and cloud clusters come from `aws eks update-kubeconfig`, `az aks get-credentials` or `gcloud container clusters get-credentials`. A kind cluster takes about 2 GB, so stop Ollama models before starting one.
+
+
+Since v100, bundle NuGet/PowerShell Gallery acquisition and restore-capable builds use command-scoped IPv4. No new secret or manual IPv6 export is needed. Keep init → setup → init → test; the .NET network probe is a WARN if connectivity fails. Regenerate demo runners with dev-demo; existing projects/modules stay.
+
+The native toolchains (install-cpp, install-asm, install-asm-arm, v63) need no accounts. The .NET SDK (install-dotnet, v63) needs none either: NuGet.org restores anonymously and private feeds are per project in `nuget.config`. Init makes sure `DOTNET_CLI_TELEMETRY_OPTOUT=1` is in `~/.bashrc` and creates the ASP.NET Core HTTPS development certificate; `dotnet dev-certs https --trust` is optional and left to you, since it edits the CA stores. New projects: `dotnet new console -o app` for C#, `dotnet new console -lang VB -o app` for VB.NET. WinForms and WPF are Windows-only in both languages; console, library, ASP.NET Core and Avalonia projects build and run. In Cursor and Windsurf use the clangd extension and an open C# extension, since Microsoft's C/C++ and C# Dev Kit extensions are licensed for VS Code only. Clang/LLVM and the .NET SDK together add roughly 1 GB to the container.
+
+Java (install-java, v63) needs no accounts: Maven Central and the Gradle plugin portal are anonymous, and private repositories go in `~/.m2/settings.xml` or `~/.gradle/gradle.properties` per project. Init only confirms `JAVA_HOME` is in `~/.bashrc`. There is one JDK, Debian's `default-jdk`; a project pinned to another release would need SDKMAN or the Adoptium repo, which the bundle does not install. Gradle comes from Homebrew because Debian's package is too old; it runs on the Debian JDK as long as `JAVA_HOME` is exported, so open a new terminal after setup. Homebrew's openjdk comes along as a dependency of gradle and kotlin and links its own java ahead of Debian's; since v64 setup unlinks it (brew unlink openjdk) so PATH and JAVA\_HOME name the same JDK, and the test fails if they drift apart. First Maven and Gradle builds download a few hundred MB into `~/.m2` and `~/.gradle`. Use `--no-daemon` on the 8 GB machines, or `gradle --stop` afterwards, since an idle Gradle daemon holds about 500 MB.
+
+TanStack (install-tanstack, v65) needs no account. Start, Router, Query and the rest are per-project npm libraries; the flag installs only the scaffolding CLI. `tanstack create my-app` makes a Start app with SSR, `--router-only` a client-side SPA, and `tanstack add tanstack-query` adds to an existing project (pass `--forced` when running it without a terminal). Add-on keys such as Clerk or Sentry go in each project's `.env`, and other deploy logins (`wrangler login`) are per project; since v67 init handles `vercel login` once per machine. Leave TanStack Intent on when you scaffold by hand: it wires `AGENTS.md` and `CLAUDE.md` so Claude Code, Codex and Gemini CLI can load the libraries' skills. For E2E, set `use: { channel: 'chrome' }` in `playwright.config.ts` so Playwright drives the installed Chrome and downloads no browser. `pnpm dev` serves `http://localhost:3000`, which the Windows browser reaches through WSL's localhost forwarding. If hot reload stops firing in a large project, the inotify watch limit is the usual cause; the test script warns when it is below 65536. The first scaffold fills the pnpm store with about 200 MB under `~/.local/share/pnpm`, shared by later projects.
+
+Godot (install-godot, v66) needs no account. WSLg provides OpenGL through Mesa's D3D12 driver and the bundle does not rely on Vulkan, so Godot runs here with its Compatibility renderer: pick Compatibility in the project manager when you create a project. The `godot` and `godot-mono` launchers already pass `--rendering-driver opengl3`; set `GODOT_RENDERING_DRIVER=vulkan` to override. Both editors live under `~/.local/opt/godot/current` and are replaced together when setup finds a newer release; pin one with `GODOT_VERSION=4.7.2-stable`. C# projects build with the .NET SDK from install-dotnet. Exporting a game needs install-godot-templates. Android export settings (SDK path, debug keystore) are per machine under Editor Settings, Export, Android, and Godot's docs ask for JDK 17 while the bundle installs 21, so expect to sort that out before the first Android export. The test script opens a small Godot window for a second to prove rendering works; if it reports the adapter as llvmpipe, rendering is in software. Under WSL there is no render node and no group to join: the GPU is `/dev/dxg`, and software rendering means Debian's Mesa is not using its D3D12 driver (accepted for v1 as a known issue, wsl-gotchas.md). Follow-up checks in the test say which case you are in: whether WSL exposes `/dev/dxg` (if not, update the Windows GPU driver and WSL), what `eglinfo` and `glxinfo` report, and whether Godot on native Wayland gets a hardware renderer. If only Wayland is accelerated, start the editors with `GODOT_DISPLAY_DRIVER=wayland`, which the launchers honour.
+
+Vercel (install-vercel, v67): init runs `vercel login`, or checks `VERCEL_TOKEN` if you set one. Per project, run `vercel link` once and then `vercel env pull` to write that project's variables to `.env.local`. The AI SDK and the AI Gateway client stay per project.
+
+Jev (install-jev, v67) is TypeSafe AI's hosted decision model: state and typed questions go in, Choice, Score and yes/no probabilities come out, and it generates no text. Nothing is installed for it beyond TypeSafe's skill for Claude Code, invoked as `/typesafe:typesafe-ai`. Add the SDK per project with `uv add typesafe-sdk` or `pnpm add @typesafe-ai/sdk`; both read `TYPESAFE_API_KEY`. Through Vercel AI Gateway it is `pnpm add ai@latest`, the experimental `evaluate` API and model `typesafe-ai/jev`. The test script makes a live call on each route that has a key and skips the ones that do not. Pin the model version once you tune confidence thresholds, since `jev-latest` moves, and treat the published speed and accuracy figures as TypeSafe's own until you have measured on your traffic.
+
+Homebrew and PATH (v68): `brew shellenv` puts Homebrew first on PATH, and on Linux every formula links its own copies of common tools, so Homebrew's `java`, `python3`, `sqlite3`, `as` and `ld` were shadowing Debian's. Setup now writes a marked block in `~/.bashrc` that moves Homebrew's directories to the end of PATH. Tools that exist only in Homebrew (`gh`, `ddev`, `aws`, `az`, `terraform`, `kubectl`, `gradle` and the rest) are unaffected; to prefer a Homebrew copy of anything else, call it by full path. `brew doctor` will remark that `/usr/bin` comes first, which is the intent. Since v74 the block is rewritten where it stands in `~/.bashrc`; v68 to v73 moved it to the end on every run, below the kubectl completion line, so each new terminal printed `kubectl: command not found`. kubectl completion now lives in `~/.local/share/bash-completion/completions` (loaded on demand, like terminus and acli), and `k` still works as an alias with completion. The four Python venvs are built from `/usr/bin/python3`, and one that was built on Homebrew's Python is rebuilt once, which re-downloads its packages (torch included) on that run.
+
+Drupal tooling (install-drupal, v68): one machine-level CLI per host, and everything else per project. DDEV's web container already carries `terminus`, `acli` and the Upsun CLI for `ddev pull`; the host copies are for work outside a project. Per project, not installed by the bundle: Drush, PHPStan with phpstan-drupal, PHPCS with Drupal Coder, Drupal Rector and Upgrade Status as Composer dev dependencies (host PHP 8.4 runs `vendor/bin/phpcs` for the editor), and for contrib module work `ddev add-on get ddev/ddev-drupal-contrib`, which runs the same checks as drupal.org's CI. Xdebug is already in DDEV (`ddev xdebug on`, editor listens on 9003). PHP Intelephense is on Open VSX, so it works in Cursor and Windsurf too. Terminus plugin installed: rsync. Pantheon Secrets need no plugin: Terminus 4 has `terminus secret:site:set`, `secret:site:list` and the `secret:org:*` commands built in, and the old secrets-manager plugin is deprecated. Both CLIs self-update with `terminus self:update` and `acli self:update`.
+
+Laravel (`install-laravel`, v87) needs no account: each app keeps its settings in its own `.env`. Start one with `laravel new <app>` in a new terminal, then `composer run dev` (server, queue worker, logs and Vite together). Per project: Laravel Boost gives Claude Code the app's docs and tools (`composer require laravel/boost --dev`, then `php artisan boost:install`). The front-end build fetches the welcome page's font from fonts.bunny.net, so it needs the network.
+
+Symfony (`install-symfony`, v88) needs no account either: each app keeps its settings in `.env` and `.env.local`. Start one with `symfony new <app> --webapp`, then `symfony serve` in it. `symfony new` makes a first git commit, so set `GIT_NAME` and `GIT_EMAIL` in secrets.env first (or pass `--no-git`). For https from `symfony serve`, run `symfony server:ca:install` yourself: it adds the CLI's own CA to the system and browser trust stores, so init only mentions it.
+
+The shared services (v89) cost memory only while they run: Redis and Memcached together about 25 MB idle, Solr or OpenSearch about 1 to 1.3 GB, Atlas Local about 2.5 GB. `devsvc up` refuses a start that would push past `DEVSVC_RAM_MB` (counting loaded Ollama models) and names what to stop; the heavy engines stop one another, and SQL Server or Oracle, as they start. OpenSearch and Elasticsearch need `vm.max_map_count` only with mmap on, which setup turns off. FastMCP's CLI (`fastmcp`, from the fastmcp-slim package) and the MCP Inspector (`mcp-inspector`) come with install-agentic; FastMCP itself is added per project (`uv add fastmcp`).
+
+RAM reminder for the 8 GB machines: Ollama holds about 3.5 GB while a model is loaded, so run `ollama stop gemma4:e2b-it-qat` before Android builds, large DuckDB loads, or the Temporal worker.
+
+> **Not in v1.** Everything from here to the end of this page belongs to install-retro and install-com, which are not yet supported on WSL (planned for a later version, Q11). It is the Chromebook bundle's text, kept as it is for when they are ported.
+
+v100 (Nov 5 findings): win95 boots image disks only; the separate IMGMAKE session still mounts X:.
+New win95 setup.conf/boot.conf use `output=surface` to fix maximized redraw. Keep guests off when
+editing output/scaler settings; do not change them from the Video menu during Setup. Untouched v99
+`output=opengl` lines upgrade to surface once per config (trailing spaces allowed).
+The same atomic update writes `# v100: defaults reviewed`; new v100 configs start marked.
+Keep this marker when editing: later old values or deleted output/hostkey lines stay as you chose.
+Unmarked configs from earlier drafts get one review. Edited values/comments and duplicate
+assignments keep their settings and receive the marker too. All four DOSBox-X configs default to `[dosbox] hostkey=ctrlshift`
+(Ctrl+Shift+F for full screen); existing choices stay, and misplaced hostkey lines require manual review.
+Missing defaults are added only while the guest is stopped; win31 stays opengl and DOS stays ttf.
+Review owner-added folder mounts in win95 `[autoexec]` before booting; they are never removed automatically.
+
+v100 QEMU defaults and installation completion (Nov 5–6 findings): new win2000 configs use
+`ACCEL=tcg`, `DISPLAY_OPTS="gtk,zoom-to-fit=off"` and `SOUND=none`. Untouched v99 ACCEL, DISPLAY_OPTS and SOUND
+lines upgrade once per config, matching the full original line including its comment (trailing spaces allowed).
+The same atomic update writes `# v100: defaults reviewed`; new configs start marked. Keep the marker:
+subsequent owner choices, even old spellings or deleted keys, survive setup and launch. Unmarked
+configs from earlier drafts get one review. Edited values/comments/spacing and duplicate assignments
+keep their settings; ambiguous configs receive only the marker. Running guests defer without marking.
+NT 4.0 keeps auto acceleration, scaled GTK, PS/2 and sb16; if it is slow, try TCG with the guest
+off (NT performance remains an owner check). KVM availability does not imply a guest selected KVM.
+`<guest> accel` reports the selection/reason; `<guest> preferences` reports preserved preferences.
+Raise the Windows screen area in Display Properties if the unscaled picture is too small.
+v101 keeps Windows 2000 sound off by default. For an owner-approved audio trial, stop the guest,
+set SOUND=sb16 and use its SB16/AWE32-compatible WDM driver (I/O 220, IRQ 5, DMA 1, 16-bit DMA 5).
+AUDIO_BACKEND=auto selects available native PipeWire, then PulseAudio, then an explicit silent
+backend; pipewire/pa/none can be requested explicitly. An unavailable explicit backend stops before
+launch. Native PipeWire removed the observed volume errors, but TCG playback still stuttered;
+no clean audio or KVM fix is claimed. A suitable built-in AC97 driver has not been established.
+Sound was not the cause of the boot stall.
+
+Every NT/2000 `setup` (including resumed setup and --from-cd/--raw) withholds the exchange disk and
+clears attachment acknowledgement. Finish Windows installation, reach the desktop, shut down, then
+run `<guest> exchange enable`; boot normally. Existing installations also need this one-time enable.
+Normal boots stay detached until enabled for that system disk; replacement disks require enable
+again. `exchange disable` clears the acknowledgement without changing disk contents. `exchange info`
+and status show enabled/deferred/stale. `run` refuses while withheld, before copying or launching;
+`put`/`fonts` can prepare it but warn that it is withheld. Restoring a pre-install snapshot: disable
+exchange before resuming Setup. Never use disk existence as evidence Windows finished installing.
+
+CD drive letters during Setup are provisional. After enabling exchange, assign it D: in Disk
+Management if D: is free; existing installations may have different letters. Do not rename a Windows
+system already installed on F: automatically. On an old-version install before Windows is installed,
+the historical F3/boot-CD-again workaround can make the system partition enumerate first; v100
+withholds exchange instead. Format/recreate exchange only from Linux: put/get require its FAT layout.
+Start with `exchange info` and `get` to back up accessible files before considering `exchange recreate`.
+A deleted partition is not recovered by recreate; it makes an empty disk. Never format exchange in
+Windows, and never write the guest's qcow2/NTFS C: with host mtools.
+
+v100 font diagnostics (Nov 5 finding): explicit `delphi1 setup` / `delphi N setup` checks Arial,
+Courier New, Tahoma and bold Tahoma files and retries acquisition once if the command fails or files
+are incomplete. Each attempt has a five-minute timeout plus a ten-second kill grace; timeout
+statuses are saved and retry still happens only once. The final FONT RESULT is prominent and
+nonfatal to the IDE. Both attempt statuses and output stay in `assets/logs/retro-fonts-<prefix>-<timestamp>.log`; setup records the bundle assets
+location, so logs do not depend on the launch directory. `<prefix command> status` only reads font
+files. `win31 fonts` (or another guest's fonts command) collects existing fonts from all Delphi/COM
+prefixes or the existing winetricks download cache; it never downloads or repairs. If none are found:
+`WINEPREFIX="$HOME/.local/share/wine/delphi1" winetricks corefonts tahoma`, then `win31 fonts`.
+Use the relevant Delphi N prefix to repair that prefix. Plain winetricks targets a different default
+prefix. An incomplete optional font download is a dev-test WARN; missing optional prefixes are skips.
+
+v100 loose app media: install-retro supplies genisoimage. An app CD can be built from your own CD's
+loose files; it does not make a bootable Windows installer. For example, first ensure the destination
+ISO does not exist (or choose a new name), keep it outside the source tree, then:
+
+    test ! -e "$HOME/win95/install/apps/delphi3.iso" && genisoimage -o "$HOME/win95/install/apps/delphi3.iso" -J -r -V DELPHI3 "$HOME/delphi/install/3"
+    bsdtar -tf "$HOME/win95/install/apps/delphi3.iso"
+    win95 cd delphi3
+
+Check the filenames in Windows before installing. Change the destination workspace for another
+guest. `<guest> cd` still takes ISO files, not folders. Original files stay unchanged; the ISO uses
+roughly another source-folder-sized allocation inside the guest workspace, already counted by its
+disk report. The generated retro demo itself remains under 1 MB; guest/media/log storage is separate.
+
+v100 colors (owner choice 12B): `delphi1 colors` and `delphi N colors` list `default` plus your
+own schemes in `~/.config/dev-retro/colors/NAME.reg`. No Breeze Dark data is bundled or downloaded:
+no license grant was observed. You can place your own local file there and select its name. Only
+REG_SZ RGB triplets (0–255) for the known HKCU Control Panel Colors values are accepted; other
+registry sections/types/deletions, duplicate values and invalid names are rejected before writing.
+
+    delphi1 colors list
+    delphi1 colors save before-change
+    delphi1 colors use default
+    delphi 3 colors use NAME
+
+Names use letters/digits, dot, dash or underscore and must start with a letter/digit; pass a name,
+not a path or filename extension. Save refuses an existing name and `default`. Schemes can be shared
+between prefixes, but switching/selection is per prefix. Close **all** apps in that prefix, including
+Wine apps started outside the helper; a wineserver wait check and per-prefix lock refuse busy or
+uncertain state. The helper never kills apps to obtain access. List needs no installed prefix/Wine.
+
+Explicit use sets ThemeManager ThemeActive to REG_SZ 0 (winecfg Theme: No Theme), removes inactive
+style settings, applies only validated colors and verifies registry readback. Default removes only
+known color overrides to let Wine choose colors; custom unrelated values remain. Targeted Colors
+and ThemeManager backups are in `~/.config/dev-retro/colors/backups`; failure restores them and leaves
+the selection label unchanged, or reports rollback incomplete with the retained backup path. Restart
+apps after switching; Delphi's own editor colors are separate. New prefixes get No Theme; existing
+ThemeActive/colors are preserved (only an absent ThemeActive is initialized). Setup no longer resets
+the desktop to black or reapplies a saved scheme over manual changes. The selection is a label:
+dev-test warns on manual drift or an active theme and never repairs it. Existing COM prefixes are
+not changed. The disposable real-Wine integration check uses only a test-owned scratch prefix.
+
+v100 win95 networking (Nov 5 finding): `win95 net` / `win95 net status` shows next-boot config,
+not connectivity. With Windows shut down, `win95 net on` adds the managed NE2000 block in boot.conf:
+ne2000=true, backend=slirp, nicbase=300, nicirq=3. It adds serial2=disabled only if absent to avoid
+COM2's IRQ3 conflict. Explicit serial2 values are kept; an enabled/custom COM2 must be resolved
+manually before on. `win95 net off` removes only unchanged helper-owned additions. Unmanaged or
+hand-edited network blocks are reported for manual review; no custom settings are overwritten.
+Setup.conf is untouched. Networking starts off; no drivers are installed automatically. The backend
+is checked from binary linkage/strings without starting DOSBox-X; an unsupported build refuses on.
+
+Windows 95 steps after on: add NE2000 Compatible manually (not Plug and Play), I/O 0300 / IRQ3;
+ensure no COM2 conflict; add TCP/IP, obtain an address by DHCP, reboot, inspect `winipcfg`. The Linux
+host is normally 10.0.2.2. Try a known host service and another laptop by its explicit Tailscale IPv4
+address first. Plain HTTP may work; period browser HTTPS/TLS support is limited. MagicDNS, inbound
+access, ping responses and DCOM are not promised. No host forwarding or win31 networking is added;
+the broad guest network test matrix remains deferred to v101. Shut Windows down before off/on.
+
+v100 owner observations (Nov 5–6 2026), not a claim that every Delphi version/component works:
+Delphi 3 Client/Server installed under Wine from loose CD files and its IDE ran. Once installed,
+plain `delphi 3 setup` reapplies settings; to revisit the CD menu for Local InterBase or InstallShield
+Express use `delphi 3 setup "$HOME/delphi/install/3/INSTALL.EXE"`. Setup now preserves manual colors.
+The four Internet Solutions Pack controls HTTPCT.OCX, POPCT.OCX, SMTPCT.OCX and WINSCK.OCX reported
+registration errors in that install. Clicking OK let Delphi install/run; those optional controls
+may still be unavailable. This is not advice to ignore unrelated installer errors or a claim that
+all add-ons work. Delphi 4–7 remain unverified on the owner's media.
+
+Delphi 1 and Delphi 3 IDEs predate normal wheel support and ignored the wheel under Wine, while
+Notepad in the same prefix scrolled. Use Ctrl+Up/Down and Page Up/Down in the IDE. Delphi 1 files
+belong in a folder such as `~/win31/install/apps/Delphi1` (a name containing delphi helps discovery);
+Delphi 3–7 use `~/delphi/install/N`, as loose CD files or an ISO. The Delphi 3–7 IDE launchers appear
+after their `delphi N setup`, not merely install-retro. The bare DOSBox-X launcher is Debian's own
+entry; use win31/win95/retro commands for bundle guest settings.
+
+v100 guest hand procedures (Nov 5–6 owner findings): DOSBox-X full screen can lose keyboard
+focus after switching windows on ChromeOS. Click the picture; try the current mapper's Ctrl+F10
+mouse-release shortcut and Alt+Enter if mapped. New/absent host-key settings use Ctrl+Shift, so
+Ctrl+Shift+F toggles full screen; explicit owner mappings remain. Verify these on each guest during
+acceptance: the host key alone is not asserted to release the mouse. No maximize=true default is
+added. F11/F12 mappings are under ChromeOS Settings > Device > Keyboard and inputs > Customize
+keyboard keys; QEMU instead uses Ctrl+Alt+G for a captured PS/2 mouse and `<guest> keys ctrl-alt-del`
+for NT/2000 login.
+
+Change output/scaler in the config with the guest off, not through the Video menu while running,
+especially during Setup. One owner Windows 95 Setup run became unbootable after a live menu change.
+If the picture is lost in Windows 95, the owner's blind Start-menu shutdown sequence was Ctrl+Esc,
+U, Enter; it is not a universal DOS/win31/NT shutdown shortcut. Do not force a renderer change to
+recover it. Windows 3.1 floppy setup queues all .IMG/.IMA files on A: in filename order; DOS > Swap
+floppy advances the queue. At the end choose Return to MS-DOS, then restart with win31.
+
+For NT/2000, reach the installed desktop, shut down, exchange enable, then put/get with the guest
+off. A reported D: is a convention; check the exchange volume's actual letter in older installs.
+In Disk Management assign an unused letter to an existing FAT volume with no letter, without
+formatting. If it says unallocated, stop: recreating it on Linux makes an empty disk and does not
+recover a deleted partition. Never format exchange in Windows; mtools expects the Linux-created
+FAT layout. Avoid writing C: directly from Linux: qcow2/NTFS are not exchange FAT disks and writes
+must never race a guest. Windows 2000 Setup's FAT choice above 2 GB means FAT32; after a backup,
+an optional in-guest `convert C: /fs:ntfs` changes it later (use the actual Windows system letter,
+which may differ on old installs). Conversion is never part of dev-test or automatic acceptance.
+Windows 2000 has no built-in Explorer ZIP support: unzip your archive on Linux into the guest
+workspace, then put the resulting folder. No extra ZIP software/media is downloaded by the bundle.
+
+
+### v101 QEMU smoke-test evidence
+
+The headless blank-disk test keeps stderr, timestamped QMP events and a result record under
+`assets/logs/retro-qemu-<run-stamp>/`, even when its outer timeout fails. It reports the selected
+accelerator and failure phase, then bounds quit/TERM/KILL cleanup for its own child. It never
+opens an installed guest disk or retries a KVM failure into a PASS. `quick` skips this real probe.
+Read those diagnostics before attributing a stall to KVM; the v100 timeout's cause is unproven.
+
+
+### v101 retro profiles and NT CPU
+
+New NT 4.0 configs use CPU=pentium after the observed Pentium III hal.dll STOP. Existing simple
+configs upgrade only the untouched v100 CPU template (or an absent CPU) once, recording
+`# v101: NT CPU reviewed`. Edited/duplicate/complex settings stay; running guests defer and
+symlink configs stay untouched. Keep both v100 and v101 review markers: later restored/deleted
+settings are owner choices. Windows 2000's CPU and TCG/no-sound defaults stay unchanged.
+
+For NT's drifting PS/2 pointer, use View > Grab On Hover/click capture, Ctrl+Alt+G to release and a
+slower speed in Control Panel > Mouse > Motion. Install NT's Cirrus driver for better drawing;
+skip the display Test button. No USB tablet or VMware mouse driver is added. NT KVM/TCG speed
+and Windows 2000 KVM/audio variants remain owner-run checks, one change at a time with backups.
+
+For a windowed win95 profile, keep `[sdl] output=surface` for maximized redraw. For the owner's
+full-screen stretching profile, edit the stopped guest's config to `[sdl] output=opengl` with
+`fullresolution=desktop` and `[render] aspect=false`, then use Ctrl+Shift+F with the default mapper.
+Stretching can distort aspect ratio and OpenGL may flicker in a maximized window. win31 retains
+OpenGL; verify its full-screen profile separately. DOS text stays ttf. Valid recognized renderer
+choices are informational; missing/duplicate/unrecognized values and unsafe mounts still WARN.
+Never edit the renderer from the live Video menu during Setup.
+
+The owner's Delphi 3 OLEnterprise Object Agent hung/crashed win95 with the dynamic core.
+Owner checked Nov 9 2026: `win95 --core normal` boots with the agent starting. With the guest
+shut down, set `core=normal` in the `[cpu]` section of `~/win95/boot.conf`; the owner confirmed
+this persists across plain `win95` boots. Setup already uses normal.
+
+The confirmed startup entry is in `HKLM\Software\Microsoft\Windows\CurrentVersion\RunServices`:
+value `Object Factory` = `C:\Program Files\Borland\OLEnterprise\bin\objfact.exe`.
+It runs during boot, before logon. The owner keeps it enabled for a possible later OLEnterprise
+transport. If disabling it is later desired, use Registry Editor to export the `RunServices`
+key first, then delete only the `Object Factory` value. Keep the key, other values and the
+OLEnterprise installation. This normal-core finding applies to that installation; other RPC
+software has not been verified.
+
+
+### v101 local guest link
+
+`winnt40 lan [status|on|off]` and `win2000 lan [status|on|off]` manage a local-only
+second PCnet pair, default off, through LAN keys in each existing guest config.
+Status creates nothing and never evaluates shell config or probes a peer. Stop both
+guests before editing/adoption. Follow [guest-lan.md](guest-lan.md): record the old
+MAC/model/PCI identity and static IP/WINS, keep backups, and remove only the known
+manual network stanza yourself. The managed NIC stays after USB/audio/EXTRA_ARGS.
+Ambiguous custom device layouts need recorded explicit PCI pins or are refused.
+The owner must confirm no new hardware and unchanged IP/WINS without re-entry,
+bidirectional ping/domain behavior and first-NIC internet. Remote mode is deferred.
+
+
+### v101 network procedure and advanced-demo checks
+
+- [ ] Follow [guest-network-tests.md](guest-network-tests.md); select peer addresses,
+  short/full names and a plain HTTP target before starting the controlled listener.
+- [ ] Owner starts/stops the fixed-marker listener explicitly, records DNS/connect/
+  HTTP independently and labels browser evidence accurately. HTTPGET is not built.
+- [ ] With a separately approved `./dev-demo-wsl.sh install-retro`, confirm
+  the independent advanced-demo steps/status/results menu and its NOT RUN template.
+  No Watcom, guest media, compiler or database is needed to generate the scaffold.
+- [ ] Verify rerun/refresh preserves owner work and results. Read demo-clean's exact
+  targets before confirming deletion; results under assets stay outside cleanup.
+- [ ] Keep NT SP6a, licensed media and the F0–F6 Delphi/DCOM/database/remote work as
+  staged follow-ups. Scaffold readiness is not application or guest acceptance.

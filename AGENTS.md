@@ -46,8 +46,10 @@ the Chromebooks (first init only writes the secrets template).
 
 What exists now: the five scripts at the repo root, `CHANGELOG.md`, `README.md` with the flag tables,
 `docs/plans/` (`wsl-plan.md`: decisions, the compatibility review, open questions; `v1-wsl-review.md`;
-`v1-plan.md`: the build spec, the first-run protocol, acceptance), `reference/dev-setup-chromebook/`
-(read-only copy of Chromebook v101, the fork source), lint CI, and an MIT `LICENSE`.
+`v1-plan.md`: the build spec, the first-run protocol, acceptance), `docs/init-checklist.md`,
+`docs/dev-demo.md` and `docs/wsl-gotchas.md` (the first two forked from the Chromebook bundle's, the third
+new; first-run findings go into it), `reference/dev-setup-chromebook/` (read-only copy of Chromebook
+v101, the fork source), lint CI, and an MIT `LICENSE`.
 
 ## Target environment
 
