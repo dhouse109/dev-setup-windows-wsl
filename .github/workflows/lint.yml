@@ -4,8 +4,8 @@
 # Ported from dev-setup-chromebook v101's lint.yml. Only dev-*.sh at the repo root is linted;
 # reference/ is a read-only copy of the Chromebook bundle, linted in its own repo. Until the forked
 # scripts exist the shell steps find nothing and pass.
-# Not ported yet: the Chromebook's one-version-number check (comes with v1's CHANGELOG and README), and
-# its release-archive and v101 regression tests (tests/ was not copied; v1-plan.md, P22).
+# The one-version-number check is the Chromebook's, extended to five scripts, the README and the changelog.
+# Not ported: its release-archive and v101 regression tests (tests/ was not copied; v1-plan.md, P22).
 # The powershell job checks dev-host-wsl.ps1 on a Windows runner: nothing is run, the file is only read.
 name: lint
 
@@ -45,6 +45,34 @@ jobs:
           shellcheck --version
           if [ ${#files[@]} -eq 0 ]; then echo "no dev-*.sh scripts at the repo root yet"; exit 0; fi
           shellcheck -S error "${files[@]}"
+      - name: one version number
+        # AGENTS.md rule 1: five scripts, one version. The number is read from dev-setup-wsl.sh's header;
+        # every other place the version string appears must show the same number, and so must the README
+        # and each of the five changelog sections.
+        run: |
+          want=$(sed -n '2s/^# dev-setup-wsl - Version \([0-9][0-9]*\)$/\1/p' dev-setup-wsl.sh)
+          if [ -z "$want" ]; then echo "dev-setup-wsl.sh line 2 does not carry the version"; exit 1; fi
+          echo "bundle version: $want"
+          rc=0
+          for n in setup test init demo; do
+            sed -n 2p "dev-$n-wsl.sh" | grep -qx "# dev-$n-wsl - Version $want" \
+              || { echo "dev-$n-wsl.sh: line 2 is not '# dev-$n-wsl - Version $want'"; rc=1; }
+          done
+          sed -n 1p dev-host-wsl.ps1 | tr -d '\r' | grep -qx "# dev-host-wsl - Version $want" \
+            || { echo "dev-host-wsl.ps1: line 1 is not '# dev-host-wsl - Version $want'"; rc=1; }
+          other=$(grep -Hn 'Version [0-9][0-9]*\|^VERSION=' dev-*.sh dev-host-wsl.ps1 | tr -d '\r' \
+            | grep -v "Version $want\([^0-9]\|\$\)" | grep -v ":VERSION=$want\([^0-9]\|\$\)" || true)
+          if [ -n "$other" ]; then echo "version strings that are not $want:"; echo "$other"; rc=1; fi
+          grep -q "^> \*\*Current version: v$want\.\*\*" README.md \
+            || { echo "README.md does not say 'Current version: v$want.'"; rc=1; }
+          for s in setup test init demo host; do
+            awk -v sec="## dev-$s-wsl" -v want="- **v$want**" '
+              $0 == sec { on = 1; next } /^## / { on = 0 } on && index($0, want) == 1 { found = 1 }
+              END { exit !found }' CHANGELOG.md \
+              || { echo "CHANGELOG.md: no v$want entry under '## dev-$s-wsl'"; rc=1; }
+          done
+          [ "$rc" = 0 ] && echo "all five scripts, README.md and CHANGELOG.md are at v$want"
+          exit "$rc"
 
   powershell:
     # dev-host-wsl.ps1 is written for Windows PowerShell 5.1, which every Windows 11 has, and is ASCII-only
