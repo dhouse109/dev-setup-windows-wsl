@@ -97,6 +97,10 @@ WSL. Do not run setup, init, test, demo or the host script, from this repo or fr
 work is seeding, static review and preliminary builds: edits, `bash -n`, `shellcheck -S error`, CI. Real
 runs happen in WSL on the laptops; the owner pastes the end of a test run back into the session.
 
+**Nothing from the scripts is executed or sourced in the cloud, including a fragment extracted from
+one.** Logic is checked by reading, `bash -n` and `shellcheck` only. (v1, Nov 11 2026: an extracted
+fragment skipped the host guard and ran setup's body in the sandbox.)
+
 **Locally, inside the Debian WSL distro on one of the laptops** (an agent started in the owner's WSL
 terminal; the repo is cloned into the Linux home, **never under `/mnt/c` or any `/mnt/*` path**):
 

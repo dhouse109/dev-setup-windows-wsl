@@ -177,6 +177,13 @@ the code; no change beyond stage 1's rename of the rerun line.
 **Done when** all four scripts carry byte-identical guard and flag-expansion blocks (`diff` them
 against each other), and setup alone carries the preflight.
 
+*Note (2026-11-11, stage 2 checkpoint, accepted by the owner):* for the flag-expansion block,
+"byte-identical" applies to the new parts, the refused list with its direct refusal and the strip after
+the dependency guards. The blocks as wholes already differ in v101 in four places, left as they are so
+the diff against the reference stays platform-only: the title line, setup's `DEV_REQUESTED_FLAGS` line,
+the "Active … Flags" label and the wording of the v85 comment. The guard block is byte-identical as a
+whole.
+
 ### Stage 3: setup base edits
 
 All in `dev-setup-wsl.sh`, in the order the script reaches them.
