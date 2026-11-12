@@ -1285,6 +1285,9 @@ volumes:
   pgvector-data:
     name: ddev-${DDEV_SITENAME}-pgvector
 EOF
+    # v1 (Nov 12 2026: 'php -l' on this seed.php stopped with a parse error at "install-web's", an apostrophe
+    # inside a single-quoted PHP string; Chromebook v101 has the same line, so 'ddev drush php:script' could
+    # never load the seed there either): the apostrophe is escaped as \'. Ports to dev-setup-chromebook.
     gen_file "$DIR/.ddev/devdemo/seed.php" << 'EOF'
 <?php
 
@@ -1319,7 +1322,7 @@ $articles = [
   ],
   'Which flag installs what' => [
     'install-all covers every stack except the opt-in flags: install-models, install-godot-templates, install-asm-arm, install-ansible-core, install-db-server (SQL Server, Oracle and InterBase), install-oracle-full (Oracle on its full image), install-ldap (an lldap directory), install-ldap-full (OpenLDAP next to it), install-ollama-containers, and install-hermes and install-openclaw (the personal agents Hermes Agent and OpenClaw). Five flags of the Chromebook bundle are not yet supported on WSL and are refused or skipped: install-lan and install-lan-share (the laptop network), install-android-native, install-com and install-retro.',
-    'install-laravel installs the Laravel installer (laravel new) and install-symfony the Symfony CLI (symfony new), both on top of install-web's Composer and PHP extensions. install-drupal installs Terminus, the Acquia CLI and the Upsun CLI next to DDEV. install-iac installs Terraform, tflint, Bicep and the full Ansible package. install-agentic installs Temporal, LangGraph, Pydantic and Langfuse.',
+    'install-laravel installs the Laravel installer (laravel new) and install-symfony the Symfony CLI (symfony new), both on top of install-web\'s Composer and PHP extensions. install-drupal installs Terminus, the Acquia CLI and the Upsun CLI next to DDEV. install-iac installs Terraform, tflint, Bicep and the full Ansible package. install-agentic installs Temporal, LangGraph, Pydantic and Langfuse.',
   ],
   'Firebird and InterBase in the bundle' => [
     'install-db installs Firebird 4 with its embedded engine, so a program opens a .fdb file with no server running. Its isql is called isql-fb, because unixODBC owns isql.',

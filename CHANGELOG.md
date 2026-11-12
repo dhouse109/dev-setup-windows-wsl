@@ -108,7 +108,10 @@ Optional hands-on demos, installed into `~/dev-demo`. Newest version first.
     CUDA or CPU per laptop, and only the helper commands that exist in v1.
   - Demo strings and notes reworded (the README header, Godot's renderer, no Android emulator in v1,
     Compass in the Start menu).
-  - Ports to dev-setup-chromebook: no (platform edits).
+  - Fix (Nov 12 2026): the drupal-rag demo's `seed.php` had an unescaped apostrophe inside a
+    single-quoted PHP string ("install-web's Composer"), a parse error that `php -l` reports and that
+    Chromebook v101 has too; it is escaped now. Ports to dev-setup-chromebook: yes.
+  - Ports to dev-setup-chromebook: no for the platform edits above; yes for the `seed.php` fix.
 
 ## dev-host-wsl
 
