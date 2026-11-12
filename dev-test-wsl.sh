@@ -460,6 +460,7 @@ export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
 export GEMMA_MODEL="gemma4:e2b-it-qat"
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0   # v58: pnpm/yarn shims fetch without a prompt
 export NG_CLI_ANALYTICS=false              # v58: no analytics prompt from ng new
+export DONT_PROMPT_WSL_INSTALL=1           # v1 (Q28): 'code --version' and the Devin wrapper do not stop to ask under WSL
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1   # v63: same as the installer's ~/.bashrc lines
 export PATH="$PATH:$HOME/.dotnet/tools"
 # v87: Composer's global bin (install-laravel's laravel command), at the end of PATH like setup's block.
@@ -573,7 +574,7 @@ info()  { printf '  %-62s %s\n' "$1" "${DIM}INFO${RST} $2"; echo "--- $1: INFO $
 # v92: a check that cannot run because an earlier one already failed for the same cause (counted as SKIP).
 skipped() { printf '  %-62s %s\n' "$1" "${DIM}SKIP${RST} $2"; SKIP=$((SKIP + 1)); LAST=skip; echo "--- $1: SKIP $2" >> "$LOG"; }
 
-echo "Testing Chromebook Linux provisioning (Version 1)... log: $LOG"
+echo "Testing Debian on WSL2 provisioning (Version 1)... log: $LOG"
 [ "$QUICK" = 1 ] && echo "(quick mode: slow functional tests will be skipped)"
 
 # v68: say so when dev-init has not applied the secrets file yet. Filling in secrets.env logs
@@ -600,7 +601,33 @@ init_pending_note
 # =================================================================
 section "Base system, Python tooling, SSH, Docker, Homebrew, Chrome (always)"
 
-check "passwordless sudo (installer ran 'passwd -d')"      'sudo -n true'
+# v1: sudo is passwordless through the drop-in dev-host-wsl.ps1 wrote, /etc/sudoers.d/dev-bundle (Q7, Q21);
+# the Chromebook label said "installer ran 'passwd -d'". The second check is new: the drop-in is there and
+# the whole sudoers configuration parses.
+check "passwordless sudo (the host script's sudoers drop-in)" 'sudo -n true'
+check "sudoers drop-in is in place and sudoers parses (visudo -c)" 'sudo -n test -f /etc/sudoers.d/dev-bundle || { echo "no /etc/sudoers.d/dev-bundle"; exit 1; }; sudo -n visudo -c'
+hint  "run dev-host-wsl.ps1 on Windows: it writes the drop-in for this user and checks it with visudo"
+# v1: WSL checks (T8). 'check' fails; 'warn' is for what the user may change. Setup's preflight stops on the
+# first three before it installs; here they are verified again, since the machine can change after setup.
+check "systemd is running (wsl.conf: [boot] systemd=true)"  '[ -d /run/systemd/system ] && echo "PID 1: $(ps -p 1 -o comm=)"'
+hint  "run dev-host-wsl.ps1 on Windows, then 'wsl --shutdown' and open Debian again"
+check "the bundle is in the Linux filesystem, not under /mnt" 'd=$(cd "$SCRIPT_DIR" && pwd -P); echo "$d"; case "$d/" in /mnt/*) exit 1 ;; esac'
+hint  "clone the repo into the Linux home and run it from there: under /mnt exec bits, venvs and setuid sandboxes break"
+warn  "no Windows directory on PATH (appendWindowsPath=false)" 'n=$(printf "%s\n" "$PATH" | tr ":" "\n" | grep -c "^/mnt/[a-z]\(/\|$\)"); echo "$n Windows entries on PATH"; [ "$n" = 0 ]'
+hint  "a Windows npm or code on PATH can stand in for a missing Linux one: set appendWindowsPath=false under [interop] in /etc/wsl.conf (dev-host-wsl.ps1 does), then 'wsl --shutdown'"
+# The opener (Q19): the script, its handler entry, and the Windows program it calls. No live open: it would
+# open browser tabs. Whether it is the registered handler is checked with DDEV's checks below (T13).
+warn  "the link opener is in place (~/.local/bin/dev-open)"  '[ -x "$HOME/.local/bin/dev-open" ] || { echo "no ~/.local/bin/dev-open"; exit 1; }; grep -q "^Exec=$HOME/.local/bin/dev-open " "$HOME/.local/share/applications/dev-open.desktop" || { echo "no dev-open.desktop handler entry"; exit 1; }; p=$(wslpath -u "C:\\Windows\\System32\\rundll32.exe") && [ -e "$p" ] && echo "calls $p"'
+hint  "rerun setup (any flags): it writes the opener and its handler entry. If rundll32.exe is not found, the Windows drive is not mounted in this distro"
+warn  "BROWSER and DONT_PROMPT_WSL_INSTALL in ~/.bashrc (new terminals)" 'b=$(sed -n "/^# >>> dev-setup wsl >>>\$/,/^# <<< dev-setup wsl <<<\$/p" ~/.bashrc); grep "^export " <<< "$b"; grep -q "^export BROWSER=.*/dev-open\"\{0,1\}\$" <<< "$b" && grep -q "^export DONT_PROMPT_WSL_INSTALL=1\$" <<< "$b"'
+hint  "rerun setup (any flags): it rewrites the block '# >>> dev-setup wsl >>>' in ~/.bashrc; a line of your own below it can still override"
+warn  "WSLg's X11 and Wayland sockets are present"          'x=/tmp/.X11-unix/X0; w="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${WAYLAND_DISPLAY:-wayland-0}"; ls -l "$x" "$w" 2>&1; [ -S "$x" ] && [ -S "$w" ]'
+hint  "GUI apps need both. With systemd on, a tmpfs on /tmp can hide /tmp/.X11-unix: 'wsl --shutdown' from Windows and reopen; 'wsl --update' for a current WSLg (docs/wsl-gotchas.md)"
+warn  "mkcert's CA is the one shared from Windows (CAROOT)"  'd=$(mkcert -CAROOT 2> /dev/null); echo "mkcert -CAROOT: ${d:-none}"; case "$d" in /mnt/*) [ -f "$d/rootCA.pem" ] ;; *) exit 1 ;; esac'
+hint  "without it the Windows browser warns on DDEV's https sites: run dev-host-wsl.ps1 (its mkcert step shares CAROOT through WSLENV), open a NEW terminal, rerun setup (Q24)"
+WSL_VER=$(wslinfo --wsl-version 2> /dev/null | tr -d '\r' | head -n 1)   # newer WSL only; empty elsewhere
+info  "WSL"                                                 "version ${WSL_VER:-not readable}, kernel $(uname -r), distro ${WSL_DISTRO_NAME:-?}"
+info  "Memory ceiling and swap (.wslconfig)"                "$(awk '/^MemTotal:/ { m = $2 } /^SwapTotal:/ { s = $2 } END { printf "%.1f GB memory, %.1f GB swap", m / 1048576, s / 1048576 }' /proc/meminfo)"
 # v99: these are installation outcomes/settings, not optional credential warnings.
 check "pip acquisition policy inherited by subprocesses" '[ "$PIP_RETRIES" = 5 ] && [ "$PIP_TIMEOUT" = 60 ]; rc=$?; if /usr/bin/python3 -m pip --help 2>/dev/null | grep -q -- "--resume-retries"; then [ "$PIP_RESUME_RETRIES" = 5 ] || exit 1; fi; exit "$rc"'
 cat > "$WORK/apt-policy.py" <<'APT_POLICY_PY'
@@ -941,11 +968,11 @@ case "$1" in
         o=$(devmem --brief) || { echo "devmem --brief exited $?"; exit 1; }
         n=$(grep -c . <<< "$o"); echo "$n lines"
         grep -q '^Memory: ' <<< "$o" && grep -q '^Verdict:' <<< "$o" && [ "$n" -le 10 ] ;;
-    taken)   # "taken back by ChromeOS" is a size between 0 and the total
+    taken)   # v1 (Q31): the residual, "not accounted for" ("taken back by ChromeOS" on a Chromebook), is a size between 0 and the total
         o=$(devmem) || exit 1
         t=$(sed -n 's/^Memory: \([0-9.]* [MG]B\) total.*/\1/p' <<< "$o")
-        c=$(sed -n 's/^  taken back by ChromeOS (estimate) *\([0-9.]* [MG]B\).*/\1/p' <<< "$o")
-        echo "taken back by ChromeOS: ${c:-?} of ${t:-?}"
+        c=$(sed -n 's/^  not accounted for (estimate) *\([0-9.]* [MG]B\).*/\1/p' <<< "$o")
+        echo "not accounted for: ${c:-?} of ${t:-?}"
         [ -n "$t" ] && [ -n "$c" ] || exit 1
         awk -v t="$t" -v c="$c" 'function mb(x, a) { split(x, a, " "); return a[2] == "GB" ? a[1] * 1024 : a[1] }
             BEGIN { exit !(mb(c) >= 0 && mb(c) <= mb(t)) }' ;;
@@ -954,7 +981,7 @@ DEVMEM_EOF
 check "devmem: Memory, Where, Top programs and Verdict"     'bash devmem_check.sh sections'
 hint  "rerun setup (any flags): v96 writes ~/.local/bin/devmem"
 check "devmem --brief prints a few lines"                  'bash devmem_check.sh brief'
-check "devmem: 'taken back by ChromeOS' is between 0 and the total" 'bash devmem_check.sh taken'
+check "devmem: 'not accounted for' is between 0 and the total"  'bash devmem_check.sh taken'
 # v96 (plan item 8): devclean, the disk cleanup. Its report must change nothing: the caches it would clear and DDEV's
 # state files are listed (names, sizes, times) before and after a plain 'devclean'. --run isn't run here (it clears
 # your caches); its hand check is in the v96 plan.
@@ -1157,16 +1184,16 @@ check "devclean: apt's line counts what apt-get clean removes (*.bin too)" 'bash
 # v96: DDEV's router on 8080/8443, since ChromeOS passes high ports to Linux but not 80 and 443 (Oct 26 2026:
 # ERR_CONNECTION_REFUSED on https://ddev-test.ddev.site, fine on :8443). Setup sets them unless you set others:
 # missing (or DDEV's own 80/443, which it writes into the file on every save) is a FAIL, ports of your own a WARN.
-if [ "$DEV_ON_CHROMEOS" = 1 ]; then
-    DDEV_HP=$(sed -n 's/^router_http_port:[[:space:]]*"\{0,1\}\([0-9]*\)"\{0,1\}.*/\1/p' ~/.ddev/global_config.yaml 2> /dev/null | head -n 1)
-    DDEV_SP=$(sed -n 's/^router_https_port:[[:space:]]*"\{0,1\}\([0-9]*\)"\{0,1\}.*/\1/p' ~/.ddev/global_config.yaml 2> /dev/null | head -n 1)
-    if [ "${DDEV_HP:-80}" = 80 ] && [ "${DDEV_SP:-443}" = 443 ]; then
-        check "DDEV's router on 8080/8443 (ChromeOS passes no 80/443)" "echo \"router_http_port ${DDEV_HP:-unset}, router_https_port ${DDEV_SP:-unset} in ~/.ddev/global_config.yaml\"; exit 1"
-        hint  "rerun setup (any flags; v96 runs 'ddev config global --router-http-port=8080 --router-https-port=8443'), then 'ddev poweroff'"
-    else
-        warn  "DDEV's router on 8080/8443 (ChromeOS passes no 80/443)" "echo \"router ports $DDEV_HP/$DDEV_SP\"; [ \"$DDEV_HP\" = 8080 ] && [ \"$DDEV_SP\" = 8443 ]"
-        hint  "ports you set yourself: sites are https://<site>.ddev.site:$DDEV_SP; ChromeOS's browser can't reach 80 or 443 in Linux"
-    fi
+# v1 (Q17): checked on every machine. Setup moves the router to 8080/8443 under WSL too, for parity with the
+# Chromebooks, not because of a forwarding limit; the Chromebook test ran this on ChromeOS only.
+DDEV_HP=$(sed -n 's/^router_http_port:[[:space:]]*"\{0,1\}\([0-9]*\)"\{0,1\}.*/\1/p' ~/.ddev/global_config.yaml 2> /dev/null | head -n 1)
+DDEV_SP=$(sed -n 's/^router_https_port:[[:space:]]*"\{0,1\}\([0-9]*\)"\{0,1\}.*/\1/p' ~/.ddev/global_config.yaml 2> /dev/null | head -n 1)
+if [ "${DDEV_HP:-80}" = 80 ] && [ "${DDEV_SP:-443}" = 443 ]; then
+    check "DDEV's router on 8080/8443"                          "echo \"router_http_port ${DDEV_HP:-unset}, router_https_port ${DDEV_SP:-unset} in ~/.ddev/global_config.yaml\"; exit 1"
+    hint  "rerun setup (any flags; it runs 'ddev config global --router-http-port=8080 --router-https-port=8443'), then 'ddev poweroff'"
+else
+    warn  "DDEV's router on 8080/8443"                          "echo \"router ports $DDEV_HP/$DDEV_SP\"; [ \"$DDEV_HP\" = 8080 ] && [ \"$DDEV_SP\" = 8443 ]"
+    hint  "ports you set yourself: sites are https://<site>.ddev.site:$DDEV_SP; the bundle's docs and demos assume 8080/8443"
 fi
 # v96: DDEV's usage telemetry, moved here from install-drupal with setup's step (DDEV is base; Oct 27 2026, a machine
 # without install-drupal was asked about usage statistics on its first 'ddev start'). Setup's opt-out also marks the
@@ -1176,13 +1203,12 @@ check "DDEV usage telemetry is off"                                 'grep "^inst
 hint  "rerun setup (any flags), or: ddev config global --instrumentation-opt-in=false"
 check "DDEV_NO_INSTRUMENTATION in ~/.bashrc (no usage-statistics question)" 'grep -E "^export DDEV_NO_INSTRUMENTATION=(true|1)([[:space:]]|$)" ~/.bashrc'
 hint  "rerun setup (any flags): without it each new DDEV version asks on its first 'ddev start', and Enter opts in"
-# v96: links from Linux open in ChromeOS's browser (Oct 26 2026: Linux Google Chrome had registered itself, and
-# Devin's sign-in opened there, inside the VM's memory). A WARN, since the handler is yours to change. No live open:
-# it would open browser tabs.
-if [ -f /usr/share/applications/garcon_host_browser.desktop ]; then
-    warn  "web links open in ChromeOS's browser (xdg-mime)"  'r=0; for t in x-scheme-handler/https x-scheme-handler/http text/html; do d=$(xdg-mime query default "$t" 2> /dev/null); echo "$t: ${d:-none}"; [ "$d" = garcon_host_browser.desktop ] || r=1; done; exit $r'
-    hint  "Linux Chrome may have taken them back (its \"make Chrome your default browser\" prompt): rerun setup, or xdg-mime default garcon_host_browser.desktop x-scheme-handler/https x-scheme-handler/http text/html"
-fi
+# v1 (Q19): links from Linux open in the Windows default browser, through the bundle's opener; its entry,
+# dev-open.desktop, is the handler setup registers where the Chromebook script registered garcon's. A WARN,
+# since the handler is yours to change. No live open: it would open browser tabs. Setup always writes the
+# entry, so the check is no longer inside an 'if the entry exists'.
+warn  "web links open in the Windows browser (xdg-mime: dev-open)" 'r=0; for t in x-scheme-handler/https x-scheme-handler/http text/html; do d=$(xdg-mime query default "$t" 2> /dev/null); echo "$t: ${d:-none}"; [ "$d" = dev-open.desktop ] || r=1; done; exit $r'
+hint  "Linux Chrome may have taken them back (its \"make Chrome your default browser\" prompt): rerun setup, or xdg-mime default dev-open.desktop x-scheme-handler/https x-scheme-handler/http text/html"
 
 # =================================================================
 # CONDITIONAL SECTIONS (same order as the installer)
@@ -1281,7 +1307,7 @@ if has install-tanstack; then
     hint  "network only: 'tanstack libraries', 'doc' and 'search-docs' call tanstack.com; scaffolding does not"
     # Vite watches the whole project tree. When the limit is too low hot reload silently stops firing.
     warn  "inotify watch limit is enough for Vite (>= 30000)" 'n=$(cat /proc/sys/fs/inotify/max_user_watches); echo "fs.inotify.max_user_watches = $n"; [ "$n" -ge 30000 ]'
-    hint  "try 'sudo sysctl fs.inotify.max_user_watches=524288'; if the container refuses, set server.watch.usePolling in vite.config.ts for large projects"
+    hint  "try 'sudo sysctl fs.inotify.max_user_watches=524288' (until WSL restarts; a file in /etc/sysctl.d keeps it), or set server.watch.usePolling in vite.config.ts for large projects"
     # Fixtures for the Playwright test, written here so the command below stays readable.
     mkdir -p "$WORK/ts-fixtures/e2e"
     cat > "$WORK/ts-fixtures/playwright.config.ts" <<'EOF'
@@ -1316,7 +1342,7 @@ EOF
     hint  "'tanstack create --help' shows the current flags; --no-intent and --package-manager are the likeliest to have changed"
     slow  "Start app: vite build (client + server bundles)" 'cd tsstart && pnpm build > build.log 2>&1 || { tail -n 20 build.log; exit 1; }; ls dist/client > /dev/null && ls dist/server/server.js' 600
     slow  "Start app: dev server answers with server-rendered HTML" 'cd tsstart || exit 1; node_modules/.bin/vite dev --port 3187 --strictPort > dev.log 2>&1 & pid=$!; trap "kill $pid 2>/dev/null" EXIT; ok=1; for i in $(seq 1 90); do curl -fsS http://localhost:3187/ -o page.html 2>/dev/null && { ok=0; break; }; sleep 1; done; [ $ok = 0 ] && grep -qi "<html" page.html || { tail -n 20 dev.log; exit 1; }' 180
-    hint  "port 3187 busy (a dev server left over from an interrupted run)? 'ss -ltnp | grep 3187', then kill that pid. In daily use 'pnpm dev' serves http://localhost:3000, which ChromeOS forwards to the browser"
+    hint  "port 3187 busy (a dev server left over from an interrupted run)? 'ss -ltnp | grep 3187', then kill that pid. In daily use 'pnpm dev' serves http://localhost:3000, which the Windows browser reaches through WSL's localhost forwarding"
     slow  "tanstack add tanstack-query, then rebuild"      'cd tsstart && tanstack add tanstack-query --forced > add.log 2>&1 < /dev/null; jq -e ".dependencies[\"@tanstack/react-query\"]" package.json || { tail -n 20 add.log; exit 1; }; pnpm build > build2.log 2>&1 || { tail -n 20 build2.log; exit 1; }' 600
     hint  "--forced skips the 'uncommitted changes, continue?' prompt, which exits 0 without doing anything when stdin is not a terminal"
     slow  "Vitest runs a unit test in the project"         'cd tsstart && pnpm add -D vitest > vitest.log 2>&1 || { tail -n 20 vitest.log; exit 1; }; printf "import { expect, test } from \"vitest\"\ntest(\"vitest runs in the scaffolded project\", () => { expect([1, 2, 3].map((n) => n * 2)).toEqual([2, 4, 6]) })\n" > src/smoke.test.ts && node_modules/.bin/vitest run --dir src' 600
@@ -1821,10 +1847,12 @@ if has install-cursor; then
     check "~/.local/bin PATH line in ~/.bashrc"            'grep -q ".local/bin" ~/.bashrc'
     # v52: 'cursor --version' launches the whole IDE (and dies headless on the GPU check).
     # --appimage-mount only FUSE-mounts the image and prints the mount point, which is the real test.
-    check "ChromeOS launcher entry for Cursor"             'f=~/.local/share/applications/cursor.desktop; [ -f "$f" ] && grep -q "^Type=Application" "$f" && ! grep -q "^NoDisplay=true" "$f" && exe=$(sed -n "s/^Exec=\\(.*\\) %F\$/\\1/p" "$f") && echo "Exec=$exe" && [ -x "$exe" ]'
-    hint  "rerun the installer with install-cursor; v66 writes ~/.local/share/applications/cursor.desktop"
-    warn  "Cursor launcher icon extracted from the AppImage" '[ -s ~/.local/share/icons/cursor.png ] && file ~/.local/share/icons/cursor.png | grep -q "PNG image"'
-    hint  "cosmetic: the entry falls back to a generic icon. Any PNG saved as ~/.local/share/icons/cursor.png fixes it"
+    # v1 (Q20, P9): the entry is in /usr/local/share/applications, where WSLg's Start menu looks, and its icon in
+    # /usr/local/share/pixmaps; the Chromebook test looked under ~/.local/share.
+    check "Start menu entry for Cursor"                    'f=/usr/local/share/applications/cursor.desktop; [ -f "$f" ] && grep -q "^Type=Application" "$f" && ! grep -q "^NoDisplay=true" "$f" && exe=$(sed -n "s/^Exec=\\(.*\\) %F\$/\\1/p" "$f") && echo "Exec=$exe" && [ -x "$exe" ]'
+    hint  "rerun the installer with install-cursor; it writes /usr/local/share/applications/cursor.desktop"
+    warn  "Cursor launcher icon extracted from the AppImage" '[ -s /usr/local/share/pixmaps/cursor.png ] && file /usr/local/share/pixmaps/cursor.png | grep -q "PNG image"'
+    hint  "cosmetic: the entry falls back to a generic icon. Any PNG installed as /usr/local/share/pixmaps/cursor.png fixes it"
     check "cursor AppImage runtime works"                  'cursor --appimage-offset | grep -qE "^[0-9]+$"' 30
     warn  "cursor AppImage FUSE-mounts"                    'timeout 15 cursor --appimage-mount | head -n 1 | grep -q "^/tmp/.mount_"' 30
     hint  "launch it from a Linux terminal with 'cursor &' to confirm the GUI comes up"
@@ -1838,9 +1866,12 @@ if has install-windsurf; then
     # and a terminal wrapper, both through /usr/bin/devin-desktop (Oct 26 2026: it froze or closed on ChromeOS's
     # Wayland, and an icon that ran the Electron binary directly crashed within 5 s). No GUI launch here: the
     # Chromebook run is the hand check.
+    # v1: the "Devin (X11)" entry is in /usr/local/share/applications (Q20), the wrapper also sets
+    # DONT_PROMPT_WSL_INSTALL=1 (Q28), and setup no longer writes a hidden copy of the stock entry, so the
+    # "stock entry hidden" check went with that step: both entries show in the Start menu.
     cat > "$WORK/devin_check.sh" << 'DEVIN_EOF'
 W="$HOME/.local/bin/devin-desktop"
-A="$HOME/.local/share/applications"
+A="/usr/local/share/applications"
 case "$1" in
     x11)   # "Devin (X11)": every Exec= runs the wrapper, and it is not hidden
         f="$A/devin-desktop-x11.desktop"
@@ -1853,12 +1884,8 @@ case "$1" in
     wrapper)   # runs /usr/bin/devin-desktop with --ozone-platform=x11
         [ -x "$W" ] || { echo "missing: $W"; exit 1; }
         grep -v '^#' "$W" | grep -q '/usr/bin/devin-desktop --ozone-platform=x11' || { echo "$W does not run /usr/bin/devin-desktop --ozone-platform=x11"; exit 1; }
-        echo "$W -> /usr/bin/devin-desktop --ozone-platform=x11" ;;
-    stock)   # the stock entry overridden with NoDisplay=true
-        f="$A/devin-desktop.desktop"
-        [ -f "$f" ] || { echo "no override: $f"; exit 1; }
-        awk '/^\[/ { m = ($0 == "[Desktop Entry]") } m && $0 == "NoDisplay=true" { f = 1 } END { exit !f }' "$f" || { echo "$f has no NoDisplay=true"; exit 1; }
-        echo "$f: NoDisplay=true" ;;
+        grep -v '^#' "$W" | grep -q '^export DONT_PROMPT_WSL_INSTALL=1$' || { echo "$W does not export DONT_PROMPT_WSL_INSTALL=1"; exit 1; }
+        echo "$W -> /usr/bin/devin-desktop --ozone-platform=x11, DONT_PROMPT_WSL_INSTALL=1" ;;
     path)   # a terminal's devin-desktop is the wrapper (a login shell, as a new terminal has it)
         shell_start timeout -k 5 30 bash -lc 'command -v devin-desktop' > "$WORK/devin-path.txt" 2> /dev/null || exit $?
         p=$(tail -n 1 "$WORK/devin-path.txt")
@@ -1870,10 +1897,9 @@ DEVIN_EOF
     hint  "rerun setup with install-windsurf (v96 installs devin-desktop and writes ~/.local/bin/devin-desktop)"
     check "Windsurf apt source"                            '[ -f /etc/apt/sources.list.d/windsurf.list ]'
     check "Devin (X11) launcher entry runs the wrapper"    'bash devin_check.sh x11'
-    hint  "rerun setup with install-windsurf (it regenerates ~/.local/share/applications/devin-desktop-x11.desktop), then shut Linux down once"
-    check "the wrapper runs /usr/bin/devin-desktop --ozone-platform=x11" 'bash devin_check.sh wrapper'
-    warn  "stock Devin entry hidden (NoDisplay=true)"      'bash devin_check.sh stock'
-    hint  "cosmetic: the stock icon starts Devin on Wayland; rerun setup with install-windsurf"
+    hint  "rerun setup with install-windsurf (it regenerates /usr/local/share/applications/devin-desktop-x11.desktop); a new Start menu entry can need 'wsl --shutdown' from Windows before it shows"
+    check "the wrapper: --ozone-platform=x11, DONT_PROMPT_WSL_INSTALL" 'bash devin_check.sh wrapper'
+    hint  "rerun setup with install-windsurf: it rewrites ~/.local/bin/devin-desktop"
     check "devin-desktop in a terminal is the wrapper"     'bash devin_check.sh path'
     hint  "~/.local/bin must come before /usr/bin on PATH (Debian's ~/.profile puts it first when the folder exists)"
 fi
@@ -1994,7 +2020,7 @@ TARGET_PY
         [ "$(stat -c %U "$d")" = "$(id -un)" ] || { echo "$d belongs to $(stat -c %U "$d")"; exit 1; }
         echo "$d, yours" ;;
     launcher)
-        f="$HOME/.local/share/applications/lazarus-dark.desktop"
+        f="/usr/local/share/applications/lazarus-dark.desktop"   # v1 (Q20): where WSLg's Start menu looks
         [ -f "$f" ] || { echo "missing: $f"; exit 1; }
         e=$(grep -m1 '^Exec=' "$f"); echo "$e"
         case "$e" in *QT_QPA_PLATFORMTHEME=qt5ct*) ;; *) exit 1 ;; esac
@@ -2073,7 +2099,7 @@ THR_EOF
         fi
     done
     check "Lazarus (Dark) launcher: qt5ct and --pcp=~/.lazarus-dark"   'bash lazarus_check.sh launcher'
-    hint  "rerun setup with install-lazarus (it writes ~/.local/share/applications/lazarus-dark.desktop)"
+    hint  "rerun setup with install-lazarus (it writes /usr/local/share/applications/lazarus-dark.desktop)"
     check "qt5ct config present (~/.config/qt5ct/qt5ct.conf)"          '[ -f ~/.config/qt5ct/qt5ct.conf ]'
     hint  "rerun setup with install-lazarus, or 'lazmode theme' and Apply"
     # v95: a palette you picked yourself passes, named in the line (Oct 25 2026: v94 warned about "waves",
@@ -2287,38 +2313,34 @@ EOF
     hint  "rerun the installer with install-godot; the launchers live in ~/.local/bin"
     check "both editors are the same release, under ~/.local/opt/godot/current" '[ -x ~/.local/opt/godot/current/standard/godot.x86_64 ] && [ -d ~/.local/opt/godot/current/mono/GodotSharp ] && [ "$(godot --version | cut -d. -f1-3)" = "$(godot-mono --version | cut -d. -f1-3)" ]'
     check "launchers default to the OpenGL driver"          'grep -q "rendering-driver" ~/.local/bin/godot && grep -q "rendering-driver" ~/.local/bin/godot-mono'
-    check "app-drawer entries for both editors"            '[ -f ~/.local/share/applications/godot.desktop ] && [ -f ~/.local/share/applications/godot-mono.desktop ] && grep -q "^Exec=.*/godot-mono " ~/.local/share/applications/godot-mono.desktop'
+    # v1 (Q20): the entries are in /usr/local/share/applications, where WSLg's Start menu looks.
+    check "Start menu entries for both editors"            '[ -f /usr/local/share/applications/godot.desktop ] && [ -f /usr/local/share/applications/godot-mono.desktop ] && grep -q "^Exec=.*/godot-mono " /usr/local/share/applications/godot-mono.desktop'
     # Headless editor runs sometimes abort on exit ("singleton is null", exit 134) after doing their
     # work, a Godot shutdown bug seen with 4.7.2. So imports and exports below are judged by what
     # they produce, not by their exit code.
     slow  "GDScript project imports and runs headless"     'cd gd-gds && { godot --headless --path . --import > import.log 2>&1 || true; }; godot --headless --path . 2>&1 | tee run.log | grep -q "hello from gdscript" || { tail -n 15 import.log run.log; exit 1; }' 300
     warn  "a display is available for the rendering test"   '[ -n "$DISPLAY$WAYLAND_DISPLAY" ] && echo "DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY"'
-    hint  "run the test from the ChromeOS Terminal app (not over ssh) so Godot can open a window"
+    hint  "run the test from a WSL terminal on the laptop (WSLg sets DISPLAY and WAYLAND_DISPLAY), not over ssh, so Godot can open a window"
     # The check that matters on a Chromebook: a real window, the OpenGL driver, 20 rendered frames.
     # A small Godot window flashes up for a second.
-    slow  "renders 20 frames with the Compatibility renderer (OpenGL via virgl)" 'if [ -z "$DISPLAY$WAYLAND_DISPLAY" ]; then echo "SKIPPED: no display"; exit 0; fi; cd gd-gds && godot --path . --rendering-driver opengl3 --audio-driver Dummy --resolution 320x240 2>&1 | tee render.log | grep -E "OpenGL API|rendered 20 frames"; grep -q "rendered 20 frames: method=gl_compatibility" render.log' 180
-    hint  "see the log: the 'OpenGL API ... Using Device' line says which GPU path Godot got. Crashes here are the virgl path; try the previous Godot release with GODOT_VERSION=<x.y.z>-stable"
-    warn  "rendering is GPU-accelerated (virgl), not software (llvmpipe)" 'if [ ! -f gd-gds/render.log ]; then echo "no render log (no display?)"; exit 1; fi; grep "adapter=" gd-gds/render.log; ! grep -qi "llvmpipe\|softpipe" gd-gds/render.log'
+    # v1: under WSLg, OpenGL comes from Mesa's D3D12 driver over /dev/dxg (no virgl). The test itself is as it was.
+    slow  "renders 20 frames with the Compatibility renderer (OpenGL)" 'if [ -z "$DISPLAY$WAYLAND_DISPLAY" ]; then echo "SKIPPED: no display"; exit 0; fi; cd gd-gds && godot --path . --rendering-driver opengl3 --audio-driver Dummy --resolution 320x240 2>&1 | tee render.log | grep -E "OpenGL API|rendered 20 frames"; grep -q "rendered 20 frames: method=gl_compatibility" render.log' 180
+    hint  "see the log: the 'OpenGL API ... Using Device' line says which GPU path Godot got. Crashes here are the OpenGL path (Mesa on D3D12 under WSLg); try the previous Godot release with GODOT_VERSION=<x.y.z>-stable"
+    warn  "rendering is GPU-accelerated (D3D12), not software (llvmpipe)" 'if [ ! -f gd-gds/render.log ]; then echo "no render log (no display?)"; exit 1; fi; grep "adapter=" gd-gds/render.log; ! grep -qi "llvmpipe\|softpipe" gd-gds/render.log'
     hint  "software rendering: the three checks below say where it comes from"
-    # v68: v67's first run on a Tiger Lake Chromebook rendered with llvmpipe. These narrow it down:
-    # no render node = the VM was started without a GPU; a render node but llvmpipe under X11 =
-    # the Xwayland path is unaccelerated while native Wayland may still be.
-    warn  "the Linux VM exposes a GPU (/dev/dri/renderD*)"    'ls -l /dev/dri/ 2>&1; ls /dev/dri/renderD* > /dev/null 2>&1'
-    hint  "no /dev/dri: set chrome://flags/#crostini-gpu-support to Enabled, then SHUT DOWN Linux (right-click Terminal > Shut down Linux) or reboot; restarting the terminal is not enough"
-    # v69: the suspected cause of v68's llvmpipe result. renderD128 is root:render 0660 and the user
-    # was only in 'video'. It is sommelier, started by the systemd user session at login, that
-    # needs the node (it gives Xwayland and Wayland clients their GPU device), so the group only
-    # helps after the whole container restarts; changing one app's groups proves nothing.
-    warn  "sommelier (X11/Wayland bridge) runs with the render group" 'pid=$(pgrep -u "$USER" -f sommelier | head -n 1); [ -n "$pid" ] || { echo "no sommelier process"; exit 1; }; gid=$(getent group render | cut -d: -f3); echo "sommelier pid $pid groups: $(grep ^Groups: /proc/$pid/status | cut -f2-) (render gid $gid)"; grep ^Groups: /proc/$pid/status | tr "\t " "\n\n" | grep -qx "$gid"'
-    hint  "sommelier started before you were in the render group: shut Linux down (right-click Terminal > Shut down Linux) and reopen it"
-    warn  "this session can open the render node (groups video + render)" 'for g in video render; do if id -nG | tr " " "\n" | grep -qx "$g"; then echo "$g: active"; elif getent group "$g" | grep -qw "$USER"; then echo "$g: configured, NOT active in this session"; else echo "$g: not a member"; fi; done; r=$(ls /dev/dri/renderD* 2> /dev/null | head -n 1); [ -n "$r" ] && [ -r "$r" ] && [ -w "$r" ]'
-    hint  "not a member: rerun the installer (v69 adds both groups) or 'sudo usermod -aG video,render $USER'. Configured but not active: shut Linux down (right-click Terminal > Shut down Linux) and reopen it. There is no shortcut: 'sg render' or 'newgrp' only changes the app, while sommelier (the X11/Wayland bridge that hands apps the GPU) was started at login with the old groups"
-    # eglinfo -p gbm talks to /dev/dri directly: it answers "is there a GPU at all" without needing
-    # a window, so it still works when DISPLAY is unset or Xwayland is not running.
-    warn  "the GPU itself is usable (eglinfo, GBM, no window needed)" 'r=$(eglinfo -B -p gbm 2>&1 | grep -i -m2 "renderer\|OpenGL vendor"); echo "${r:-no GBM output}"; [ -n "$r" ] && ! echo "$r" | grep -qi "llvmpipe\|softpipe\|failed"' 60
-    hint  "hardware here but llvmpipe in Godot means the windowing path (Xwayland) is the problem, not the GPU"
+    # v1: these narrow a software-rendering result down under WSLg. Its GPU is /dev/dxg, with Mesa's D3D12
+    # driver on top: there is no render node (/dev/dri/renderD*), no sommelier and no render group, so the
+    # Chromebook test's three checks of those (v68, v69) are gone; they would WARN on every run. No /dev/dxg =
+    # WSL was started without a GPU; /dev/dxg but llvmpipe = Debian's Mesa has no d3d12 driver or did not
+    # pick it (P19: accepted for v1 as a known issue, docs/wsl-gotchas.md).
+    warn  "WSL exposes the GPU (/dev/dxg)"                    'ls -l /dev/dxg 2>&1; [ -c /dev/dxg ] && [ -r /dev/dxg ] && [ -w /dev/dxg ]'
+    hint  "no /dev/dxg: update the Windows GPU driver, then from Windows 'wsl --update' and 'wsl --shutdown'. Present but not readable and writable: note its owner and mode for docs/wsl-gotchas.md"
+    # v1: the Chromebook test asked eglinfo for the GBM platform, which needs a DRM device WSLg does not
+    # provide. The Wayland platform is tried first, then X11.
+    warn  "the GPU is usable through EGL (eglinfo, Wayland or X11)" 'r=""; for p in wayland x11; do r=$(eglinfo -B -p "$p" 2>&1 | grep -i -m2 "renderer\|OpenGL vendor"); if [ -n "$r" ]; then echo "platform $p: $r"; break; fi; done; [ -n "$r" ] || { echo "no EGL output on the wayland or x11 platform"; exit 1; }; ! echo "$r" | grep -qi "llvmpipe\|softpipe\|failed"' 60
+    hint  "hardware here but llvmpipe in Godot means the windowing path (Xwayland) is the problem, not the GPU; llvmpipe here too means Mesa is not using D3D12"
     warn  "X11 apps get a hardware GL renderer (glxinfo)"    'if [ -z "$DISPLAY" ]; then echo "SKIPPED: no DISPLAY"; exit 0; fi; r=$(glxinfo -B 2> /dev/null | grep -i "OpenGL renderer"); echo "$r"; [ -n "$r" ] && ! echo "$r" | grep -qi "llvmpipe\|softpipe"' 60
-    hint  "'unable to open display' means no X server for this shell (DISPLAY unset or Xwayland not running): run the test from the ChromeOS Terminal app, not over ssh. Otherwise compare with the GBM and Wayland results"
+    hint  "'unable to open display' means no X server for this shell (DISPLAY unset or Xwayland not running): run the test from a WSL terminal on the laptop, not over ssh. Otherwise compare with the EGL and Wayland results"
     slowwarn "Godot on native Wayland gets a hardware renderer" 'if [ -z "$WAYLAND_DISPLAY" ]; then echo "SKIPPED: no WAYLAND_DISPLAY"; exit 0; fi; cd gd-gds && godot --path . --display-driver wayland --rendering-driver opengl3 --audio-driver Dummy --resolution 320x240 2>&1 | tee render-wayland.log | grep -E "OpenGL API|rendered 20 frames"; grep -q "rendered 20 frames" render-wayland.log && ! grep -qi "llvmpipe\|softpipe" render-wayland.log' 180
     hint  "if this one is accelerated and the X11 one is not, launch the editor with: godot --display-driver wayland (or GODOT_DISPLAY_DRIVER in the launcher)"
     # C#: the editor normally generates the .csproj/.sln from its menu; written by hand here. The
@@ -2366,8 +2388,8 @@ AGY_PROFILE
     # v73: the graphical app lives under /opt and is installed from a tarball you put in ./assets.
     warn  "Antigravity IDE or desktop app installed (from a tarball in ./assets)" 'ok=1; for p in /opt/antigravity-ide/current/antigravity-ide /opt/antigravity/current/antigravity; do [ -x "$p" ] && { echo "$p"; ok=0; }; done; exit $ok'
     hint  "download the Linux x64 tarball from antigravity.google/download into ./assets, then rerun the installer with install-antigravity"
-    check "Antigravity GUI install is launchable (if installed)" 'n=0; for pair in "/opt/antigravity-ide antigravity-ide" "/opt/antigravity antigravity"; do set -- $pair; [ -x "$1/current/$2" ] || continue; n=1; s="$1/current/chrome-sandbox"; if [ -f "$s" ]; then m=$(stat -c "%U:%G:%a" "$s"); echo "$s $m"; [ "$m" = root:root:4755 ] || exit 1; fi; [ -L "$HOME/.local/bin/$2" ] && [ -f "$HOME/.local/share/applications/$2.desktop" ] || { echo "missing command link or launcher entry for $2"; exit 1; }; echo "$2: command link and launcher entry present"; done; [ $n = 1 ] || echo "SKIPPED: no GUI install"'
-    hint  "rerun the installer with install-antigravity: it sets chrome-sandbox to root:root 4755 and writes the launcher entry"
+    check "Antigravity GUI install is launchable (if installed)" 'n=0; for pair in "/opt/antigravity-ide antigravity-ide" "/opt/antigravity antigravity"; do set -- $pair; [ -x "$1/current/$2" ] || continue; n=1; s="$1/current/chrome-sandbox"; if [ -f "$s" ]; then m=$(stat -c "%U:%G:%a" "$s"); echo "$s $m"; [ "$m" = root:root:4755 ] || exit 1; fi; [ -L "$HOME/.local/bin/$2" ] && [ -f "/usr/local/share/applications/$2.desktop" ] || { echo "missing command link or Start menu entry for $2"; exit 1; }; echo "$2: command link and Start menu entry present"; done; [ $n = 1 ] || echo "SKIPPED: no GUI install"'
+    hint  "rerun the installer with install-antigravity: it sets chrome-sandbox to root:root 4755 and writes the entry to /usr/local/share/applications (v1, Q20)"
 fi
 
 # Mobile base: Android SDK / JDK / NDK (same trigger as the installer)
@@ -2382,11 +2404,8 @@ if has install-mobile || has install-tauri || has install-rn || has install-flut
     check "build-tools installed"                          'ls -d "$ANDROID_HOME"/build-tools/*/'
     check "NDK installed and NDK_HOME points at it"        'grep -q "^export NDK_HOME" ~/.bashrc && [ -x "$NDK_HOME/ndk-build" ]'
     check "all SDK licenses accepted"                      '(yes 2> /dev/null || true) | sdkmanager --licenses 2>&1 | grep -q "All SDK package licenses accepted"' 180
-    # v56: the Android runtime isn't auto-discovered from Crostini; connect to it first. 'arc' is the
-    # ChromeOS hostname for the container (100.115.92.2:5555 is the same thing). The first connect
-    # pops an "Allow USB debugging?" dialog on the ChromeOS side that has to be accepted once.
-    warn  "adb sees this Chromebook's Android runtime"     'adb connect arc > /dev/null 2>&1 || adb connect 100.115.92.2:5555 > /dev/null 2>&1; adb devices; adb devices | tail -n +2 | grep -qE "\bdevice$"' 30
-    hint  "enable ADB debugging (ChromeOS Settings -> About ChromeOS -> Linux development environment -> Develop Android apps), restart, then accept the 'Allow USB debugging?' dialog that 'adb connect arc' triggers; 'unauthorized' in the list above means the dialog is still pending"
+    # v1 (Q10, Q34a): no 'adb connect arc' check. There is no Android runtime beside WSL, and v1 attaches no
+    # device (usbipd-win comes with Android, later), so the Chromebook test's WARN would show on every run.
 
     if has install-mobile || has install-tauri; then
         section "Tauri mobile (install-tauri)"
@@ -3958,7 +3977,7 @@ echo "$r" | grep -qx alpha'
             slowwarn "a container on DDEV's network reaches devredis:6379" 'if ! docker network inspect ddev_default > /dev/null 2>&1; then echo "SKIPPED: no ddev_default network yet"; exit 0; fi; img=$(docker inspect -f "{{.Config.Image}}" devsvc-redis); docker run --rm --network ddev_default -e REDISCLI_AUTH --entrypoint redis-cli "$img" -h devredis --no-auth-warning ping | grep -q PONG && echo "devredis:6379 answers PONG from ddev_default"' 300
         fi
         if [ "${REDIS_INSIGHT:-1}" = 1 ]; then
-            check "Redis Insight desktop app, in the ChromeOS launcher" 'dpkg-query -W -f="\${Package} \${Version}\n" "redisinsight*" 2> /dev/null | grep . || { echo "Redis Insight is not installed"; exit 1; }; ls /usr/share/applications | grep -i insight'
+            check "Redis Insight desktop app, in the Start menu"   'dpkg-query -W -f="\${Package} \${Version}\n" "redisinsight*" 2> /dev/null | grep . || { echo "Redis Insight is not installed"; exit 1; }; ls /usr/share/applications | grep -i insight'
         else
             info "Redis Insight" "SKIP: explicitly disabled (REDIS_INSIGHT=0)"
         fi
@@ -4169,7 +4188,7 @@ EOF
         hint  "setup installs MongoDB's .deb (rerun setup with install-mongodb); 'devsvc cli mongodb' falls back to the container's mongosh"
         check "MongoDB Database Tools (mongodump, mongorestore, mongoimport)" 'for c in mongodump mongorestore mongoimport mongoexport; do command -v "$c" > /dev/null || { echo "missing: $c"; exit 1; }; done; mongodump --version | head -n 1'
         if [ "${MONGODB_COMPASS:-1}" = 1 ]; then
-            check "MongoDB Compass desktop app, in the ChromeOS launcher" 'dpkg-query -W -f="\${Package} \${Version}\n" mongodb-compass && ls /usr/share/applications | grep -i compass'
+            check "MongoDB Compass desktop app, in the Start menu"  'dpkg-query -W -f="\${Package} \${Version}\n" mongodb-compass && ls /usr/share/applications | grep -i compass'
         else
             info "MongoDB Compass" "SKIP: explicitly disabled (MONGODB_COMPASS=0)"
         fi
@@ -4439,7 +4458,7 @@ ollama stop "$GEMMA_MODEL" > /dev/null 2>&1
 exit $ok
 EOF
     slow  "ollama generates with $GEMMA_MODEL (loads model, ~4GB RAM)" 'bash ollama_gen.sh' 1800
-    hint  "\"timed out waiting for llama runner\" = the load outlasted Ollama's limit (rerun setup with install-ollama: it sets a 15-minute limit); \"requires more system memory\" = genuinely not enough RAM. Either way, closing Chrome tabs and Android apps on the ChromeOS side gives the Linux VM memory back"
+    hint  "\"timed out waiting for llama runner\" = the load outlasted Ollama's limit (rerun setup with install-ollama: it sets a 15-minute limit); \"requires more system memory\" = genuinely not enough RAM. Either way, free memory inside Linux ('devmem' says what holds it) or raise WSL's ceiling (memory= in .wslconfig, then 'wsl --shutdown')"
 fi
 
 # Curated local models (v77, install-models; opt-in, not in install-all)
@@ -4484,7 +4503,7 @@ echo "${free} KB free; configured/default reserve $margin GB"
 MODEL_MARGIN
     warn "configured/default free-space margin for Ollama models" 'bash model-margin.sh'
 
-    hint  "'ollama rm <model>' for models you no longer use, or give Linux more disk (ChromeOS Settings > About ChromeOS > Linux development environment)"
+    hint  "'ollama rm <model>' for models you no longer use, or free space on the Windows drive that holds the distro's disk ('devclean'; docs/wsl-gotchas.md)"
     # Thinking off and 32 tokens: this proves the model loads and answers, not how well it reasons.
     # Whatever is loaded is stopped first, so the load time is comparable between runs.
     cat > "$WORK/models_gen.sh" <<'EOF'
@@ -4502,9 +4521,9 @@ echo "$r" | jq -r 'if (.eval_duration // 0) > 0 then (.eval_count / (.eval_durat
 echo "$r" | jq -e '(.error == null) and ((.response // "") | length > 0)' > /dev/null
 EOF
     slow  "deepseek-r1:1.5b answers (thinking off, 32 tokens)" 'bash models_gen.sh' 1800
-    hint  "a first load reads the model from disk into RAM; a timeout usually means little memory was available (close Chrome tabs and Android apps on the ChromeOS side)"
+    hint  "a first load reads the model from disk into RAM; a timeout usually means little memory was available ('devmem' says what holds it; WSL's ceiling is memory= in .wslconfig)"
     if [ -s "$WORK/ollama_ps.txt" ]; then
-        info "where deepseek-r1:1.5b ran (Ollama's PROCESSOR column)" "$(awk 'NR == 2' "$WORK/ollama_ps.txt" | grep -oE '[0-9]+%/[0-9]+% CPU/GPU|[0-9]+% (CPU|GPU)' | head -n 1) (always CPU in Crostini)"
+        info "where deepseek-r1:1.5b ran (Ollama's PROCESSOR column)" "$(awk 'NR == 2' "$WORK/ollama_ps.txt" | grep -oE '[0-9]+%/[0-9]+% CPU/GPU|[0-9]+% (CPU|GPU)' | head -n 1)"
     fi
     [ -s "$WORK/tps.txt" ] && info "deepseek-r1:1.5b generation speed" "$(cat "$WORK/tps.txt") tokens/s"
     # Whether the 8K context and the q8_0 KV cache took effect: Ollama falls back to an f16 cache,
@@ -7510,7 +7529,7 @@ if has install-openclaw; then
     hint  "openclaw config set gateway.bind loopback; for other devices prefer Tailscale Serve over a LAN bind (OpenClaw's own advice)"
     check "no OpenClaw gateway listening beyond this machine"   'f="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"; p=$(jq -r ".gateway.port // 18789" "$f" 2> /dev/null || echo 18789); l=$(ss -ltnH "sport = :${p:-18789}" | awk "{print \$4}"); echo "port ${p:-18789}: ${l:-not listening}"; ! echo "$l" | grep -vqE "^(127\.0\.0\.1|\[::1\]):|^$"'
     warn  "OpenClaw asks before running commands (tools.exec.mode)" 'f="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"; m=$(jq -r ".tools.exec.mode // empty" "$f" 2> /dev/null); s=$(jq -r ".tools.exec.security // empty" "$f" 2> /dev/null); a=$(jq -r ".tools.exec.ask // empty" "$f" 2> /dev/null); echo "mode=${m:-unset} security=${s:-unset} ask=${a:-unset} (unset = run anything without asking)"; case "$m" in ask|allowlist|deny|auto) exit 0 ;; esac; [ "$a" = on-miss ] || [ "$a" = always ] || [ "$s" = deny ] || [ "$s" = allowlist ]'
-    hint  "dev-init sets it once OpenClaw is onboarded: openclaw config set tools.exec.mode ask (the Crostini user has passwordless sudo)"
+    hint  "dev-init sets it once OpenClaw is onboarded: openclaw config set tools.exec.mode ask (this user has passwordless sudo)"
     warn  "OpenClaw feature statistics recorded as off"          'f="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"; v=$(jq -r ".telemetry.enabled | tostring" "$f" 2> /dev/null); [ "$v" = null ] && v=""; echo "telemetry.enabled=${v:-not recorded (off by default; a wizard may ask)}"; [ "$v" = false ]'
     hint  "openclaw telemetry off (setup and dev-init run it); the daily update check is separate and stays on"
     warn  "openclaw security audit: nothing critical"           'out=$(openclaw security audit 2>&1 | sed "s/\x1b\[[0-9;]*m//g"); echo "$out" | grep -m1 "^Summary"; echo "$out" | grep -q "Summary: 0 critical"' 120
@@ -7770,6 +7789,18 @@ if ! has nodisk; then
     dpaths total "home directory, everything in it"         "$HOME"
     read -r _dsize _dused _davail < <(df -B1 --output=size,used,avail / | tail -n 1)
     _disk_report total "Linux disk used (of $(numfmt --to=iec --suffix=B "${_dsize:-0}"), $(numfmt --to=iec --suffix=B "${_davail:-0}") free)" "${_dused:-0}" "df /"
+    # v1 (Q25, P8): 'df /' reads the distro's virtual disk; what can run out first is the Windows drive that
+    # holds it. One INFO row and TSV line for that drive's free space: /mnt/c unless DEV_WSL_HOST_DRIVE names
+    # another (a letter, or its mount point), as in setup's disk guards.
+    _wdrive=${DEV_WSL_HOST_DRIVE:-/mnt/c}
+    case "$_wdrive" in [A-Za-z]|[A-Za-z]:) _wdrive=${_wdrive%:}; _wdrive="/mnt/${_wdrive,,}" ;; esac
+    _wsize=0; _wavail=0
+    mountpoint -q "$_wdrive" 2> /dev/null && read -r _wsize _wavail < <(df -B1 --output=size,avail "$_wdrive" 2> /dev/null | tail -n 1)
+    if [[ "${_wsize:-0}" =~ ^[0-9]+$ ]] && [ "${_wsize:-0}" -gt 0 ]; then
+        _disk_report total "Windows drive $_wdrive free (of $(numfmt --to=iec --suffix=B "$_wsize"))" "${_wavail:-0}" "df $_wdrive"
+    else
+        info "total: Windows drive $_wdrive free" "not readable (not a mounted Windows drive; DEV_WSL_HOST_DRIVE names it)"
+    fi
     echo "      Disk report saved to $DISK_TSV"
 fi
 
